@@ -601,21 +601,37 @@ export default function Page() {
     setDeviceType("mini");
   };
 
-  const doLogin = () => {
-    const email = loginEmail.trim().toLowerCase();
-    const pw = loginPassword;
+  const doLogin = async () => {
+  const email = loginEmail.trim().toLowerCase();
+  const pw = loginPassword;
 
-    const u = USERS.find((x) => x.email.toLowerCase() === email && x.password === pw);
-    if (!u) {
+  try {
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password: pw }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || !data?.success) {
       setLoginError("Login fehlgeschlagen. Bitte E-Mail/Passwort prüfen.");
       return;
     }
 
     setLoginError(null);
     setIsAuthed(true);
-    setOperator(u.name);
+
+    // nur für Anzeige im UI:
+    if (email === "mustafa@next-wave.tech") setOperator("Mustafa Ergin");
+    else if (email === "jonas@next-wave.tech") setOperator("Jonas Harlacher");
+    else setOperator(email);
+
     setStep("delivery");
-  };
+  } catch {
+    setLoginError("Login fehlgeschlagen (Server nicht erreichbar).");
+  }
+};
 
   const setFieldValue = (key: string, value: any) => {
     setRows((prev) => prev.map((x, i) => (i === activeIdx ? { ...x, [key]: value } : x)));
