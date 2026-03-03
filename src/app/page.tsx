@@ -7,7 +7,7 @@ import jsPDF from "jspdf";
 
 // ✅ Relativer Import, damit kein @/ Alias nötig ist
 // Wenn deine Datei anders heißt: ../lib/layoutConfig
-import { loadLayouts } from "../lib/layoutconfig";
+import { loadLayouts } from "../lib/layoutConfig";
 
 /** =========================
  * Types (tolerant & robust)
