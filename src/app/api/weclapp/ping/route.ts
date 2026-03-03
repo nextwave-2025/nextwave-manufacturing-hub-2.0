@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { weclappFetch } from "../../../../../lib/weclapp";
-
+import { weclappFetch } from "../../../../lib/weclapp";
 export async function GET() {
   return NextResponse.json({
     ok: true,
