@@ -21,12 +21,15 @@ if (!file || typeof (file as any).arrayBuffer !== "function") {
   );
 }
 
-  const filename =
-    (form.get("name") as string) || file.name || `Fertigungsprotokoll-${shipmentId}.pdf`;
+ const providedName = form.get("name");
+const filename =
+  (typeof providedName === "string" && providedName.trim() ? providedName.trim() : "") ||
+  ((file as Blob & { name?: string }).name ?? "") ||
+  `Fertigungsprotokoll-${shipmentId}.pdf`;
   const description =
     (form.get("description") as string) || "NEXTWAVE Fertigungsprotokoll";
 
-const pdfBytes = Buffer.from(await (file as any).arrayBuffer());
+const pdfBytes = Buffer.from(await (file as Blob).arrayBuffer());
   
   const qs = new URLSearchParams({
     entityName: "shipment",
