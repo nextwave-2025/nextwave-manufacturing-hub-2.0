@@ -69,31 +69,38 @@ type EditState =
   | { open: false };
 
 export default function AdminPage() {
-  // ✅ Login Gate (1:1 wie User-Mode)
-  type UserKey = "mustafa" | "jonas";
-  const USERS: { key: UserKey; name: string; email: string; password: string }[] = [
-    { key: "mustafa", name: "Mustafa Ergin", email: "mustafa@next-wave.tech", password: "NEXTWAVE123" },
-    { key: "jonas", name: "Jonas Harlacher", email: "jonas@next-wave.tech", password: "NEXTWAVE123" },
-  ];
-
+  // ✅ Login Gate (UI wie vorher – aber Prüfung serverseitig über /api/auth/login)
   const [isAuthed, setIsAuthed] = useState(false);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
 
-  const doLogin = () => {
-    const email = loginEmail.trim().toLowerCase();
-    const pw = loginPassword;
-
-    const u = USERS.find((x) => x.email.toLowerCase() === email && x.password === pw);
-    if (!u) {
-      setLoginError("Login fehlgeschlagen. Bitte E-Mail/Passwort prüfen.");
-      return;
-    }
-
+  const doLogin = async () => {
     setLoginError(null);
-    setIsAuthed(true);
+
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: loginEmail,
+          password: loginPassword,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setLoginError((data as any)?.error || "Login fehlgeschlagen. Bitte E-Mail/Passwort prüfen.");
+        return;
+      }
+
+      setLoginError(null);
+      setIsAuthed(true);
+    } catch (e) {
+      setLoginError("Serverfehler beim Login.");
+    }
   };
 
   // ======== DEIN BESTEHENDER ADMIN-CODE (UNVERÄNDERT) ========
@@ -343,7 +350,7 @@ export default function AdminPage() {
             </div>
 
             <div className="text-xs text-neutral-500 dark:text-neutral-300 pt-2">
-              Hinweis: Das ist nur ein UI-Gate. Für echte Sicherheit muss Auth serverseitig erfolgen (Cookie + Middleware).
+              Hinweis: Login wird serverseitig geprüft (HttpOnly Cookie).
             </div>
           </div>
         </div>
@@ -403,8 +410,7 @@ export default function AdminPage() {
 
               <div className="flex gap-2">
                 <Btn variant="outline" onClick={addSection}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  + Section
+                  <Plus className="h-4 w-4 mr-2" />+ Section
                 </Btn>
                 <Btn variant="outline" onClick={resetAll}>
                   <RefreshCcw className="h-4 w-4 mr-2" />
@@ -460,10 +466,11 @@ export default function AdminPage() {
                               <div className="font-mono text-sm font-semibold">{f.key}</div>
                               <Badge>Typ: {f.type}</Badge>
                               {f.required ? <Badge>Required</Badge> : <Badge>Optional</Badge>}
-                              {"requiresCommentWhenNo" in f && f.requiresCommentWhenNo ? <Badge>Kommentar bei NEIN</Badge> : null}
+                              {"requiresCommentWhenNo" in f && (f as any).requiresCommentWhenNo ? <Badge>Kommentar bei NEIN</Badge> : null}
                               {f.showWhen ? (
                                 <Badge>
-                                  Sichtbar wenn: {f.showWhen.key} {"eqYn" in f.showWhen ? `= ${f.showWhen.eqYn}` : `= ${String(f.showWhen.eqBool)}`}
+                                  Sichtbar wenn: {f.showWhen.key}{" "}
+                                  {"eqYn" in f.showWhen ? `= ${(f.showWhen as any).eqYn}` : `= ${String((f.showWhen as any).eqBool)}`}
                                 </Badge>
                               ) : null}
                             </div>
@@ -530,9 +537,7 @@ export default function AdminPage() {
           >
             <div className="p-6 border-b border-neutral-200 dark:border-neutral-800">
               <div className="text-lg font-extrabold">Feld bearbeiten</div>
-              <div className="text-sm text-neutral-500 dark:text-neutral-300 mt-1">
-                Achtung: Key ändern kann bestehende gespeicherte Werte “entkoppeln”.
-              </div>
+              <div className="text-sm text-neutral-500 dark:text-neutral-300 mt-1">Achtung: Key ändern kann bestehende gespeicherte Werte “entkoppeln”.</div>
             </div>
 
             <div className="p-6 space-y-4">
@@ -563,12 +568,8 @@ export default function AdminPage() {
                     value={edit.draft.type}
                     onChange={(e) => {
                       const t = e.target.value as "yn" | "boolean";
-                      // type switch: keep key/label/required/showWhen
-                      if (t === "yn") {
-                        setEdit({ ...edit, draft: { ...(edit.draft as any), type: "yn" } });
-                      } else {
-                        setEdit({ ...edit, draft: { ...(edit.draft as any), type: "boolean" } });
-                      }
+                      if (t === "yn") setEdit({ ...edit, draft: { ...(edit.draft as any), type: "yn" } });
+                      else setEdit({ ...edit, draft: { ...(edit.draft as any), type: "boolean" } });
                     }}
                   >
                     <option value="yn">yn</option>
@@ -625,7 +626,7 @@ export default function AdminPage() {
                     <input
                       className="w-full h-11 rounded-2xl border border-neutral-200 bg-white px-4 text-sm outline-none focus:ring-2 focus:ring-[#f15124] dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100 font-mono"
                       placeholder="z.B. osInstalled"
-                      value={edit.draft.showWhen?.key ?? ""}
+                      value={(edit.draft as any).showWhen?.key ?? ""}
                       onChange={(e) => {
                         const key = e.target.value.trim();
                         if (!key) {
@@ -634,9 +635,8 @@ export default function AdminPage() {
                           setEdit({ ...edit, draft: d });
                           return;
                         }
-                        // default rule type depends on field type
-                        if (edit.draft.type === "yn") setEdit({ ...edit, draft: { ...edit.draft, showWhen: { key, eqYn: "yes" as Yn } } });
-                        else setEdit({ ...edit, draft: { ...edit.draft, showWhen: { key, eqBool: true } } });
+                        if (edit.draft.type === "yn") setEdit({ ...edit, draft: { ...edit.draft, showWhen: { key, eqYn: "yes" as Yn } } as any });
+                        else setEdit({ ...edit, draft: { ...edit.draft, showWhen: { key, eqBool: true } } as any });
                       }}
                     />
                   </div>
@@ -646,13 +646,13 @@ export default function AdminPage() {
                     {edit.draft.type === "yn" ? (
                       <select
                         className="w-full h-11 rounded-2xl border border-neutral-200 bg-white px-4 text-sm outline-none focus:ring-2 focus:ring-[#f15124] dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
-                        value={(edit.draft.showWhen && "eqYn" in edit.draft.showWhen ? edit.draft.showWhen.eqYn : "yes") as Yn}
+                        value={((edit.draft as any).showWhen && "eqYn" in (edit.draft as any).showWhen ? (edit.draft as any).showWhen.eqYn : "yes") as Yn}
                         onChange={(e) => {
-                          const key = edit.draft.showWhen?.key || "";
+                          const key = (edit.draft as any).showWhen?.key || "";
                           if (!key) return;
-                          setEdit({ ...edit, draft: { ...edit.draft, showWhen: { key, eqYn: e.target.value as Yn } } });
+                          setEdit({ ...edit, draft: { ...edit.draft, showWhen: { key, eqYn: e.target.value as Yn } } as any });
                         }}
-                        disabled={!edit.draft.showWhen?.key}
+                        disabled={!(edit.draft as any).showWhen?.key}
                       >
                         <option value="yes">yes</option>
                         <option value="no">no</option>
@@ -661,13 +661,13 @@ export default function AdminPage() {
                     ) : (
                       <select
                         className="w-full h-11 rounded-2xl border border-neutral-200 bg-white px-4 text-sm outline-none focus:ring-2 focus:ring-[#f15124] dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
-                        value={edit.draft.showWhen && "eqBool" in edit.draft.showWhen ? String(edit.draft.showWhen.eqBool) : "true"}
+                        value={(edit.draft as any).showWhen && "eqBool" in (edit.draft as any).showWhen ? String((edit.draft as any).showWhen.eqBool) : "true"}
                         onChange={(e) => {
-                          const key = edit.draft.showWhen?.key || "";
+                          const key = (edit.draft as any).showWhen?.key || "";
                           if (!key) return;
-                          setEdit({ ...edit, draft: { ...edit.draft, showWhen: { key, eqBool: e.target.value === "true" } } });
+                          setEdit({ ...edit, draft: { ...edit.draft, showWhen: { key, eqBool: e.target.value === "true" } } as any });
                         }}
-                        disabled={!edit.draft.showWhen?.key}
+                        disabled={!(edit.draft as any).showWhen?.key}
                       >
                         <option value="true">true</option>
                         <option value="false">false</option>
@@ -683,7 +683,7 @@ export default function AdminPage() {
                         delete (d as any).showWhen;
                         setEdit({ ...edit, draft: d });
                       }}
-                      disabled={!edit.draft.showWhen}
+                      disabled={!(edit.draft as any).showWhen}
                     >
                       Regel löschen
                     </Btn>
