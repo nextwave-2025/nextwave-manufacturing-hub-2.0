@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { weclappFetch } from "@/lib/weclapp";
+import { weclappFetch } from "../../../../lib/weclapp";
 
 export async function GET() {
   const res = await weclappFetch("/shipment?page=1&pageSize=1");
