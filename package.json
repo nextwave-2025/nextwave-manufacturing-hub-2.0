@@ -4,7 +4,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "node .next/standalone/server.js"
   },
   "dependencies": {
     "jspdf": "^4.1.0",
@@ -21,11 +21,5 @@
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.13",
     "typescript": "^5.6.3"
-  }
-}
-{
-  "scripts": {
-    "build": "next build",
-    "start": "node .next/standalone/server.js"
   }
 }
