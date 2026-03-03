@@ -26,8 +26,8 @@ if (!file || typeof (file as any).arrayBuffer !== "function") {
   const description =
     (form.get("description") as string) || "NEXTWAVE Fertigungsprotokoll";
 
-  const pdfBytes = Buffer.from(await file.arrayBuffer());
-
+const pdfBytes = Buffer.from(await (file as any).arrayBuffer());
+  
   const qs = new URLSearchParams({
     entityName: "shipment",
     entityId: shipmentId,
