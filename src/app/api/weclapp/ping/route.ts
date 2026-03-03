@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
-import { weclappFetch } from "../../../../../lib/weclapp"; // so wie bei dir ohne @-Alias
+import { weclappFetch } from "../../../../../lib/weclapp";
+
+export async function GET() {
+  return NextResponse.json({
+    ok: true,
+    info: "Route exists. Use POST with multipart/form-data (field: file).",
+  });
+}
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   const shipmentId = params.id;
@@ -8,7 +15,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const file = form.get("file");
 
   if (!(file instanceof File)) {
-    return NextResponse.json({ success: false, error: "Missing file" }, { status: 400 });
+    return NextResponse.json({ success: false, error: "Missing file (form field 'file')" }, { status: 400 });
   }
 
   const filename = (form.get("name") as string) || file.name || `Fertigungsprotokoll-${shipmentId}.pdf`;
@@ -25,9 +32,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const res = await weclappFetch(`/document/upload?${qs.toString()}`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/pdf",
-    },
+    headers: { "Content-Type": "application/pdf" },
     body: pdfBytes,
   });
 
