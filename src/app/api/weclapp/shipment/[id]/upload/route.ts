@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { weclappFetch } from "../../../../../../lib/weclapp";
-import { requireAuth } from "../../../../../lib/auth";
+import { requireAuth } from "../../../../../../lib/auth";
 
 export async function GET() {
   const auth = requireAuth();
