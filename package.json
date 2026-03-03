@@ -4,6 +4,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "postbuild": "mkdir -p .next/standalone/.next && cp -r .next/static .next/standalone/.next/static && if [ -d public ]; then cp -r public .next/standalone/public; fi",
     "start": "node .next/standalone/server.js"
   },
   "dependencies": {
@@ -22,10 +23,4 @@
     "tailwindcss": "^3.4.13",
     "typescript": "^5.6.3"
   }
-}
-"scripts": {
-  "dev": "next dev",
-  "build": "next build",
-  "postbuild": "mkdir -p .next/standalone/.next && cp -r .next/static .next/standalone/.next/static && if [ -d public ]; then cp -r public .next/standalone/public; fi",
-  "start": "node .next/standalone/server.js"
 }
