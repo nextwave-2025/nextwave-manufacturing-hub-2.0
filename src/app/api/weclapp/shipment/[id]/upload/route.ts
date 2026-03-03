@@ -12,14 +12,14 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const shipmentId = params.id;
 
   const form = await req.formData();
-  const file = form.get("file");
+const file = form.get("file");
 
-  if (!(file instanceof File)) {
-    return NextResponse.json(
-      { success: false, error: "Missing file (form field 'file')" },
-      { status: 400 }
-    );
-  }
+if (!file || typeof (file as any).arrayBuffer !== "function") {
+  return NextResponse.json(
+    { success: false, error: "Missing file (form field 'file')" },
+    { status: 400 }
+  );
+}
 
   const filename =
     (form.get("name") as string) || file.name || `Fertigungsprotokoll-${shipmentId}.pdf`;
