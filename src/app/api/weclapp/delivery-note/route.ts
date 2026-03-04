@@ -43,14 +43,20 @@ function inferDeviceType(productTitles: string[]) {
   return "mini";
 }
 
-// ✅ aus Weclapp Article-Objekt robust die Warengruppe/Artikelkategorie ziehen
-function getCategoryNameFromArticle(article: any): string {
+// ✅ robust: categoryId aus Article holen (Weclapp ist hier je nach Setup unterschiedlich)
+function getCategoryIdFromArticle(article: any): string {
   return String(
-    article?.articleCategoryName ||
-      article?.articleCategory?.name ||
+    article?.articleCategoryId ||
+      article?.articleCategory?.id ||
       article?.articleCategory ||
+      article?.categoryId ||
       "",
   ).trim();
+}
+
+// ✅ robust: Name aus ArticleCategory holen
+function getCategoryNameFromArticleCategory(cat: any): string {
+  return String(cat?.name || cat?.articleCategoryName || cat?.description || "").trim();
 }
 
 export async function GET(req: Request) {
@@ -69,33 +75,25 @@ export async function GET(req: Request) {
 
   const tried: any[] = [];
   const tryUrls = [
-    // shipment
     `${apiBase}/shipment?shipmentNumber=${encodeURIComponent(numberOrId)}`,
     `${apiBase}/shipment/id/${encodeURIComponent(numberOrId)}`,
-
-    // deliveryNote
     `${apiBase}/deliveryNote?deliveryNoteNumber=${encodeURIComponent(numberOrId)}`,
     `${apiBase}/deliveryNote/id/${encodeURIComponent(numberOrId)}`,
   ];
 
-  // ✅ NUR diese beiden Warengruppen zählen als Fertigungs-Devices
   const ALLOWED_GROUPS = new Set<string>(["Barebone Mini-PC", "Rugged Tablet"]);
 
   for (const url of tryUrls) {
     const r = await weclappGet(url);
     tried.push({ url, status: r.status, bodyPreview: (r.text || "").slice(0, 200) });
-
     if (!r.ok) continue;
 
     const obj = Array.isArray(r.json?.result) ? r.json.result[0] : r.json;
     if (!obj) continue;
 
     const entity = url.includes("/shipment") ? "shipment" : "deliveryNote";
-
-    // ✅ Items normalisieren
     const items: any[] = obj?.shipmentItems || obj?.deliveryNoteItems || obj?.items || [];
 
-    // ✅ customerName robust
     const customerName: string =
       obj?.customerName ||
       obj?.customer?.name ||
@@ -103,24 +101,18 @@ export async function GET(req: Request) {
       obj?.invoiceAddress?.company ||
       "";
 
-    // ✅ product names
     const productNames: string[] = uniq(
       items
         .map((it: any) => String(it?.title || it?.articleName || "").trim())
         .filter((v: string) => Boolean(v)),
     );
 
-    // ✅ serials grouped by product title (Positionen)
     const serialsByProduct: Record<string, string[]> = {};
-
     for (const it of items) {
       const title = String(it?.title || it?.articleName || "").trim();
       if (!title) continue;
 
       const picks = Array.isArray(it?.picks) ? it.picks : [];
-
-      // ✅ HIER ist der entscheidende Fix:
-      // wir erzeugen explizit string[] und geben uniq<string> damit es NICHT unknown[] wird
       const serials: string[] = uniq<string>(
         picks
           .flatMap((p: any) => (Array.isArray(p?.serialNumbers) ? p.serialNumbers : []))
@@ -133,35 +125,52 @@ export async function GET(req: Request) {
 
     const serials: string[] = uniq<string>(Object.values(serialsByProduct).flat());
 
-    // ✅ Warengruppe je articleId nachladen
+    // ✅ Artikel-IDs sammeln
     const articleIds: string[] = uniq(
       items
         .map((it: any) => String(it?.articleId || "").trim())
         .filter((v: string) => Boolean(v)),
     );
 
-    const articleCategoryById = new Map<string, string>();
+    // ✅ 1) Article laden → categoryId
+    const categoryIdByArticleId = new Map<string, string>();
 
     await Promise.all(
-      articleIds.map(async (id) => {
-        const ar = await weclappGet(`${apiBase}/article/id/${encodeURIComponent(id)}`);
+      articleIds.map(async (articleId) => {
+        const ar = await weclappGet(`${apiBase}/article/id/${encodeURIComponent(articleId)}`);
         if (!ar.ok) return;
-        const catName = getCategoryNameFromArticle(ar.json);
-        if (catName) articleCategoryById.set(id, catName);
+        const catId = getCategoryIdFromArticle(ar.json);
+        if (catId) categoryIdByArticleId.set(articleId, catId);
       }),
     );
 
-    // ✅ deviceItems inkl. Warengruppe
+    // ✅ 2) Category laden → categoryName
+    const uniqueCategoryIds: string[] = uniq(Array.from(categoryIdByArticleId.values()).filter(Boolean));
+    const categoryNameById = new Map<string, string>();
+
+    await Promise.all(
+      uniqueCategoryIds.map(async (catId) => {
+        const cr = await weclappGet(`${apiBase}/articleCategory/id/${encodeURIComponent(catId)}`);
+        if (!cr.ok) return;
+        const name = getCategoryNameFromArticleCategory(cr.json);
+        if (name) categoryNameById.set(catId, name);
+      }),
+    );
+
+    // ✅ deviceItems inkl. Warengruppe-Name
     const deviceItems: Array<{
       articleId: string;
       title: string;
+      categoryId: string;
       categoryName: string;
       serials: string[];
     }> = items
       .map((it: any) => {
         const articleId = String(it?.articleId || "").trim();
         const title = String(it?.title || it?.articleName || "").trim();
-        const categoryName = articleId ? articleCategoryById.get(articleId) || "" : "";
+
+        const categoryId = articleId ? categoryIdByArticleId.get(articleId) || "" : "";
+        const categoryName = categoryId ? categoryNameById.get(categoryId) || "" : "";
 
         const picks = Array.isArray(it?.picks) ? it.picks : [];
         const itemSerials: string[] = uniq<string>(
@@ -171,11 +180,10 @@ export async function GET(req: Request) {
             .filter((v: string) => Boolean(v)),
         );
 
-        return { articleId, title, categoryName, serials: itemSerials };
+        return { articleId, title, categoryId, categoryName, serials: itemSerials };
       })
       .filter((x) => Boolean(x.title) && x.serials.length > 0);
 
-    // ✅ nur S/N aus den 2 Warengruppen
     const deviceSerials: string[] = uniq<string>(
       deviceItems
         .filter((x) => ALLOWED_GROUPS.has(x.categoryName))
@@ -203,14 +211,12 @@ export async function GET(req: Request) {
       serials,
       serialsByProduct,
 
-      // ✅ neu: Positionen inkl. Warengruppe
       deviceItems,
-
-      // ✅ nur relevante Seriennummern für Fertigung
       deviceSerials,
 
       deviceType,
 
+      // optional zum Debuggen
       raw: obj,
     });
   }
