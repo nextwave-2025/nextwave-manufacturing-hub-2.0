@@ -45,10 +45,7 @@ function inferDeviceType(productTitles: string[]) {
 
 export async function GET(req: Request) {
   if (!WECLAPP_BASE_URL || !WECLAPP_API_TOKEN) {
-    return jsonError(
-      "Weclapp API nicht konfiguriert (WECLAPP_BASE_URL oder WECLAPP_API_TOKEN fehlt).",
-      500,
-    );
+    return jsonError("Weclapp API nicht konfiguriert (WECLAPP_BASE_URL oder WECLAPP_API_TOKEN fehlt).", 500);
   }
 
   const { searchParams } = new URL(req.url);
@@ -79,10 +76,10 @@ export async function GET(req: Request) {
 
     const entity = url.includes("/shipment") ? "shipment" : "deliveryNote";
 
-    // ✅ Items normalisieren
+    // ✅ Items normalisieren (Shipment / DeliveryNote)
     const items: any[] = obj?.shipmentItems || obj?.deliveryNoteItems || obj?.items || [];
 
-    // ✅ customerName robust: shipment hat oft recipientAddress.company
+    // ✅ customerName robust (bei dir: recipientAddress.company = 4xperts GmbH)
     const customerName: string =
       obj?.customerName ||
       obj?.customer?.name ||
@@ -92,14 +89,14 @@ export async function GET(req: Request) {
 
     // ✅ product names: garantiert string[]
     const productNames: string[] = uniq(
-      (items as any[])
+      items
         .map((it: any) => String(it?.title || it?.articleName || "").trim())
         .filter((v: string) => Boolean(v)),
     );
 
     // ✅ serials aus picks: garantiert string[]
     const serials: string[] = uniq(
-      (items as any[])
+      items
         .flatMap((it: any) => (Array.isArray(it?.picks) ? it.picks : []))
         .flatMap((p: any) => (Array.isArray(p?.serialNumbers) ? p.serialNumbers : []))
         .map((x: any) => String(x || "").trim())
