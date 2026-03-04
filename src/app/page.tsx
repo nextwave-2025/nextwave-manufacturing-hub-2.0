@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Check, AlertTriangle, Search, ArrowLeft, ArrowRight, Eye, EyeOff, Download } from "lucide-react";
+import { Check, AlertTriangle, Search, ArrowLeft, ArrowRight, Eye, EyeOff, Download, Loader2 } from "lucide-react";
 import jsPDF from "jspdf";
 
 // ✅ Relativer Import, damit kein @/ Alias nötig ist
@@ -78,8 +78,33 @@ type Row = {
   [key: string]: any;
 };
 
+// ✅ Weclapp API response types (tolerant)
+type WeclappDeviceItem = {
+  articleId: string;
+  title: string;
+  categoryId?: string;
+  categoryName?: string;
+  serials: string[];
+};
+
+type WeclappDeliveryNoteResponse = {
+  ok: boolean;
+  error?: string;
+
+  entity?: "shipment" | "deliveryNote";
+  input?: string;
+
+  documentNumber?: string;
+  salesOrderNumber?: string;
+
+  customerName?: string;
+  productNames?: string[];
+
+  deviceItems?: WeclappDeviceItem[];
+  deviceSerials?: string[];
+};
+
 const ORANGE = "#f15124";
-const DEMO_UNITS = 2; // ✅ quickly switch (2 / 8 / 20)
 
 /** =========================
  * Helpers
@@ -87,12 +112,6 @@ const DEMO_UNITS = 2; // ✅ quickly switch (2 / 8 / 20)
 
 function normalizeSn(v: string) {
   return (v || "").trim().replace(/\s+/g, "").toUpperCase();
-}
-
-function inferDeviceTypeFromDeliveryNote(dn: string): DeviceType {
-  const s = (dn || "").toUpperCase();
-  if (s.includes("RUG") || s.includes("WAVETAB") || s.includes("TAB")) return "rugged";
-  return "mini";
 }
 
 function emptyRow(sn: string): Row {
@@ -464,10 +483,18 @@ export default function Page() {
   const [showPassword, setShowPassword] = useState(false);
 
   // delivery / workflow state
-  const [dnInput, setDnInput] = useState("DN-2026-001");
+  const [dnInput, setDnInput] = useState(""); // ✅ real
   const [dnLoaded, setDnLoaded] = useState(false);
+
+  const [documentNumber, setDocumentNumber] = useState<string>("");
+  const [salesOrderNumber, setSalesOrderNumber] = useState<string>("");
+
   const [customerName, setCustomerName] = useState<string>("");
   const [productNames, setProductNames] = useState<string[]>([]);
+  const [deviceItems, setDeviceItems] = useState<WeclappDeviceItem[]>([]);
+
+  const [dnLoading, setDnLoading] = useState(false);
+  const [dnError, setDnError] = useState<string | null>(null);
 
   const [expectedSerials, setExpectedSerials] = useState<string[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
@@ -504,8 +531,13 @@ export default function Page() {
 
         if (typeof s.dnInput === "string") setDnInput(s.dnInput);
         if (typeof s.dnLoaded === "boolean") setDnLoaded(s.dnLoaded);
+
+        if (typeof s.documentNumber === "string") setDocumentNumber(s.documentNumber);
+        if (typeof s.salesOrderNumber === "string") setSalesOrderNumber(s.salesOrderNumber);
+
         if (typeof s.customerName === "string") setCustomerName(s.customerName);
         if (Array.isArray(s.productNames)) setProductNames(s.productNames);
+        if (Array.isArray(s.deviceItems)) setDeviceItems(s.deviceItems);
 
         if (Array.isArray(s.expectedSerials)) setExpectedSerials(s.expectedSerials);
         if (Array.isArray(s.rows)) setRows(s.rows);
@@ -554,8 +586,13 @@ export default function Page() {
 
           dnInput,
           dnLoaded,
+
+          documentNumber,
+          salesOrderNumber,
+
           customerName,
           productNames,
+          deviceItems,
 
           expectedSerials,
           rows,
@@ -582,8 +619,11 @@ export default function Page() {
     deviceType,
     dnInput,
     dnLoaded,
+    documentNumber,
+    salesOrderNumber,
     customerName,
     productNames,
+    deviceItems,
     expectedSerials,
     rows,
     activeIdx,
@@ -655,7 +695,7 @@ export default function Page() {
     setScanError(null);
 
     if (!expectedSerials.includes(sn)) {
-      setScanError(`Achtung! Diese S/N wurde im Lieferschein ${dnInput} nicht erfasst: ${sn}`);
+      setScanError(`Achtung! Diese S/N wurde im Lieferschein/Shipment ${dnInput} nicht erfasst: ${sn}`);
       return;
     }
 
@@ -702,6 +742,12 @@ export default function Page() {
     setStep("delivery");
 
     setDnLoaded(false);
+    setDnError(null);
+    setDnLoading(false);
+
+    setDocumentNumber("");
+    setSalesOrderNumber("");
+
     setCustomerName("");
     setExpectedSerials([]);
     setRows([]);
@@ -711,6 +757,8 @@ export default function Page() {
     setAutoAdvance(false);
 
     setProductNames([]);
+    setDeviceItems([]);
+
     setSignatureInitials("");
     setSignatureDataUrl("");
     setShowPdfPreview(false);
@@ -722,18 +770,19 @@ export default function Page() {
     const email = loginEmail.trim().toLowerCase();
     const pw = loginPassword;
 
-   const u = USERS.find((x) => x.email.toLowerCase() === email);
-if (!u) {
-  setLoginError("Login fehlgeschlagen. Bitte E-Mail prüfen.");
-  return;
-}
+    const u = USERS.find((x) => x.email.toLowerCase() === email);
+    if (!u) {
+      setLoginError("Login fehlgeschlagen. Bitte E-Mail prüfen.");
+      return;
+    }
 
     try {
       // ✅ Serverseitig Cookie setzen
       const r = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: u.email, password: pw }),
+        body: JSON.stringify({ email: u.email, password: pw },
+        ),
       });
 
       const j = await r.json();
@@ -754,6 +803,68 @@ if (!u) {
 
   const setFieldValue = (key: string, value: any) => {
     setRows((prev) => prev.map((x, i) => (i === activeIdx ? { ...x, [key]: value } : x)));
+  };
+
+  // ✅ REAL: Lieferschein/Shipment aus Weclapp holen
+  const loadDeliveryFromWeclapp = async () => {
+    const input = (dnInput || "").trim();
+    if (!input) return;
+
+    setDnLoading(true);
+    setDnError(null);
+
+    try {
+      const r = await fetch(`/api/weclapp/delivery-note?number=${encodeURIComponent(input)}`, {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      const j = (await r.json()) as WeclappDeliveryNoteResponse;
+
+      if (!r.ok || !j?.ok) {
+        setDnError(j?.error || `Weclapp-Request fehlgeschlagen (HTTP ${r.status}).`);
+        setDnLoaded(false);
+        return;
+      }
+
+      const cust = (j.customerName || "").trim();
+      const prods = Array.isArray(j.productNames) ? j.productNames : [];
+      const items = Array.isArray(j.deviceItems) ? j.deviceItems : [];
+      const sns = Array.isArray(j.deviceSerials) ? j.deviceSerials : [];
+
+      // Gerätetyp aus Warengruppe ableiten (stabil, unabhängig vom Produktnamen)
+      const hasRugged = items.some((x) => (x.categoryName || "").trim() === "Rugged Tablet");
+      const inferred: DeviceType = hasRugged ? "rugged" : "mini";
+      setDeviceType(inferred);
+
+      const normalized = sns.map(normalizeSn).filter(Boolean);
+      setExpectedSerials(normalized);
+      setRows(normalized.map((sn) => emptyRow(sn)));
+
+      setCustomerName(cust);
+      setProductNames(prods);
+      setDeviceItems(items);
+
+      setDocumentNumber((j.documentNumber || "").trim());
+      setSalesOrderNumber((j.salesOrderNumber || "").trim());
+
+      setDnLoaded(true);
+      setScanError(null);
+      setSearch("");
+      setActiveIdx(-1);
+
+      setShowPdfPreview(false);
+      setSignatureInitials("");
+      setSignatureDataUrl("");
+
+      // refresh layouts in case admin changed them
+      setLayouts(loadLayouts() as any);
+    } catch (e: any) {
+      setDnError("Weclapp-Request fehlgeschlagen (Netzwerk/JSON).");
+      setDnLoaded(false);
+    } finally {
+      setDnLoading(false);
+    }
   };
 
   const downloadPdf = () => {
@@ -798,13 +909,15 @@ if (!u) {
 
     doc.setFont("helvetica", "bold");
     doc.setFontSize(16);
-    doc.text("NEXTWAVE – Fertigungsprotokoll (Demo)", margin, y);
+    doc.text("NEXTWAVE – Fertigungsprotokoll", margin, y);
     y += 22;
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(11);
     writeLine(`Kunde: ${customerName || "—"}`);
-    writeLine(`Lieferschein: ${dnInput || "—"}`);
+    writeLine(`Eingabe (Lieferschein/Shipment): ${dnInput || "—"}`);
+    writeLine(`Belegnummer: ${documentNumber || "—"}`);
+    writeLine(`Auftragsnummer: ${salesOrderNumber || "—"}`);
     writeLine(`Gerätetyp: ${deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet"}`);
     writeLine(`Bearbeiter: ${operator || "—"}`);
     writeLine(`Datum: ${todayStr}`);
@@ -851,7 +964,7 @@ if (!u) {
       }
     }
 
-    const safeDn = (dnInput || "DN").replace(/[^\w\-]+/g, "_");
+    const safeDn = (dnInput || "DOC").replace(/[^\w\-]+/g, "_");
     doc.save(`NEXTWAVE_Fertigungsprotokoll_${safeDn}.pdf`);
   };
 
@@ -1070,11 +1183,18 @@ if (!u) {
                     {dnLoaded ? (
                       <>
                         <span className="text-white/60 font-semibold">Kunde:</span> <span className="text-white font-semibold">{customerName}</span>{" "}
-                        <span className="text-white/35">•</span> <span className="text-white/60 font-semibold">Lieferschein:</span>{" "}
+                        <span className="text-white/35">•</span> <span className="text-white/60 font-semibold">Eingabe:</span>{" "}
                         <span className="text-white font-semibold">{dnInput}</span>
+                        {documentNumber ? (
+                          <>
+                            {" "}
+                            <span className="text-white/35">•</span> <span className="text-white/60 font-semibold">Beleg:</span>{" "}
+                            <span className="text-white font-semibold">{documentNumber}</span>
+                          </>
+                        ) : null}
                       </>
                     ) : (
-                      <span className="text-white/70">Bitte zuerst einen Lieferschein auswählen.</span>
+                      <span className="text-white/70">Bitte zuerst einen Lieferschein/Shipment laden.</span>
                     )}
                   </div>
 
@@ -1156,7 +1276,7 @@ if (!u) {
           </div>
 
           <div className="bg-white dark:bg-neutral-900 px-6 py-3 sm:px-8 sm:py-4 text-xs text-neutral-600 dark:text-neutral-300">
-            Optimiert für Tablet & Desktop (Demo).
+            Optimiert für Tablet & Desktop.
           </div>
         </div>
 
@@ -1192,7 +1312,7 @@ if (!u) {
         {/* DELIVERY */}
         {step === "delivery" && (
           <Card>
-            <CardHeader title="Lieferschein auswählen" desc="Später: Daten aus weclapp laden (Kunde, Warengruppe → Gerätetyp, Seriennummern, Produkte)." />
+            <CardHeader title="Lieferschein / Shipment holen" desc="Eingabe z. B. Lieferschein-/Shipment-Nummer oder ID → Live aus Weclapp." />
             <CardBody>
               <div className="space-y-4">
                 <div className="flex flex-col sm:flex-row gap-3 max-w-2xl">
@@ -1200,55 +1320,46 @@ if (!u) {
                     className="w-full h-11 rounded-2xl border border-neutral-200 bg-white px-4 text-sm outline-none focus:ring-2 focus:ring-[#f15124] dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
                     value={dnInput}
                     onChange={(e) => setDnInput(e.target.value)}
+                    placeholder="z. B. 31969"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") loadDeliveryFromWeclapp();
+                    }}
                   />
 
-                  <Btn
-                    disabled={!dnInput || !operator}
-                    onClick={() => {
-                      const inferred = inferDeviceTypeFromDeliveryNote(dnInput);
-                      setDeviceType(inferred);
-
-                      const sns = Array.from({ length: DEMO_UNITS }).map((_, i) =>
-                        inferred === "rugged" ? `NW-RUGGED-${String(i + 1).padStart(4, "0")}` : `NW-MINIO-${String(i + 1).padStart(4, "0")}`,
-                      );
-                      const normalized = sns.map(normalizeSn);
-                      setExpectedSerials(normalized);
-                      setRows(normalized.map((sn) => emptyRow(sn)));
-
-                      setCustomerName("Musterkunde GmbH");
-                      setDnLoaded(true);
-                      setScanError(null);
-                      setSearch("");
-                      setActiveIdx(-1);
-
-                      setProductNames(
-                        inferred === "rugged"
-                          ? ['WAVETAB Rugged 10" Industrial Tablet', "WAVETAB Zubehör / Dock (Demo)"]
-                          : ["MINIO Barebone i3-1215UE (Demo)", "MINIO Zubehör-Kit (Demo)"],
-                      );
-
-                      setShowPdfPreview(false);
-                      setSignatureInitials("");
-                      setSignatureDataUrl("");
-
-                      // refresh layouts in case admin changed them
-                      setLayouts(loadLayouts() as any);
-                    }}
-                  >
-                    Laden
+                  <Btn disabled={!dnInput || !operator || dnLoading} onClick={loadDeliveryFromWeclapp}>
+                    {dnLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Laden…
+                      </>
+                    ) : (
+                      "Laden"
+                    )}
                   </Btn>
                 </div>
+
+                {dnError ? (
+                  <div className="flex items-start gap-2 rounded-2xl border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+                    <AlertTriangle className="h-4 w-4 mt-0.5" />
+                    <span>{dnError}</span>
+                  </div>
+                ) : null}
 
                 {dnLoaded && (
                   <div className="rounded-2xl border border-neutral-200 p-4 bg-neutral-50 space-y-2 dark:border-neutral-800 dark:bg-neutral-950">
                     <div>
-                      <b>Kunde:</b> {customerName}
+                      <b>Kunde:</b> {customerName || "—"}
                     </div>
                     <div>
-                      <b>Lieferschein:</b> {dnInput}
+                      <b>Eingabe:</b> {dnInput}
                     </div>
                     <div>
-                      <b>Gerätetyp (auto):</b>{" "}
+                      <b>Belegnummer:</b> {documentNumber || "—"}
+                    </div>
+                    <div>
+                      <b>Auftragsnummer:</b> {salesOrderNumber || "—"}
+                    </div>
+                    <div>
+                      <b>Gerätetyp (Warengruppe):</b>{" "}
                       <span className="font-semibold">{deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet"}</span>
                     </div>
 
@@ -1265,8 +1376,23 @@ if (!u) {
                       )}
                     </div>
 
+                    <div className="flex flex-col gap-1">
+                      <b>Relevante Geräte (Warengruppe):</b>
+                      {deviceItems.length ? (
+                        <div className="flex flex-wrap gap-2">
+                          {deviceItems
+                            .filter((x) => (x.categoryName || "").trim() === "Barebone Mini-PC" || (x.categoryName || "").trim() === "Rugged Tablet")
+                            .map((x) => (
+                              <Chip key={`${x.articleId}-${x.title}`}>{`${x.categoryName || "—"}: ${x.title}`}</Chip>
+                            ))}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-neutral-500 dark:text-neutral-300">—</div>
+                      )}
+                    </div>
+
                     <div className="flex items-center gap-2 mt-1">
-                      <b>Erwartet:</b> {expectedSerials.length} Geräte <Chip>Demo</Chip>
+                      <b>Erwartet:</b> {expectedSerials.length} Gerät(e) <Chip tone="green">live</Chip>
                     </div>
                   </div>
                 )}
@@ -1276,19 +1402,25 @@ if (!u) {
                     variant="outline"
                     onClick={() => {
                       setDnLoaded(false);
+                      setDnError(null);
+
+                      setDocumentNumber("");
+                      setSalesOrderNumber("");
+
                       setExpectedSerials([]);
                       setRows([]);
                       setActiveIdx(-1);
                       setSearch("");
                       setScanError(null);
                       setProductNames([]);
+                      setDeviceItems([]);
                     }}
                   >
                     <ArrowLeft className="mr-2 h-4 w-4" /> Zurücksetzen Lieferschein
                   </Btn>
 
                   <Btn
-                    disabled={!dnLoaded}
+                    disabled={!dnLoaded || expectedSerials.length === 0}
                     onClick={() => {
                       setStep("checks");
                       setActiveIdx(-1);
@@ -1298,6 +1430,12 @@ if (!u) {
                     Zur Fertigung <ArrowRight className="ml-2 h-4 w-4" />
                   </Btn>
                 </div>
+
+                {dnLoaded && expectedSerials.length === 0 ? (
+                  <div className="text-xs text-neutral-500 dark:text-neutral-300">
+                    Hinweis: Es wurden keine Seriennummern in den Warengruppen <b>Barebone Mini-PC</b> / <b>Rugged Tablet</b> gefunden.
+                  </div>
+                ) : null}
               </div>
             </CardBody>
           </Card>
@@ -1446,14 +1584,20 @@ if (!u) {
         {/* SUMMARY */}
         {step === "summary" && (
           <Card>
-            <CardHeader title="Zusammenfassung (Demo)" desc="PDF Vorschau/Download, Signatur, später Upload zu weclapp." />
+            <CardHeader title="Zusammenfassung" desc="PDF Vorschau/Download, Signatur, später Upload zu weclapp." />
             <CardBody>
               <div className="rounded-2xl border border-neutral-200 p-4 bg-neutral-50 space-y-2 dark:border-neutral-800 dark:bg-neutral-950">
                 <div>
                   <b>Kunde:</b> {customerName}
                 </div>
                 <div>
-                  <b>Lieferschein:</b> {dnInput}
+                  <b>Eingabe:</b> {dnInput}
+                </div>
+                <div>
+                  <b>Belegnummer:</b> {documentNumber || "—"}
+                </div>
+                <div>
+                  <b>Auftragsnummer:</b> {salesOrderNumber || "—"}
                 </div>
 
                 <div className="flex flex-col gap-1">
@@ -1502,9 +1646,9 @@ if (!u) {
                   <ArrowLeft className="mr-2 h-4 w-4" /> Zurück
                 </Btn>
 
-                <Btn onClick={() => setShowPdfPreview(true)}>PDF Vorschau (Demo)</Btn>
+                <Btn onClick={() => setShowPdfPreview(true)}>PDF Vorschau</Btn>
 
-                <Btn onClick={() => alert("Upload zu weclapp (Demo).")}>Upload zu weclapp (Demo)</Btn>
+                <Btn onClick={() => alert("Upload zu weclapp (kommt als nächster Schritt).")}>Upload zu weclapp</Btn>
               </div>
             </CardBody>
           </Card>
@@ -1549,7 +1693,13 @@ if (!u) {
                     <b>Kunde:</b> {customerName}
                   </div>
                   <div>
-                    <b>Lieferschein:</b> {dnInput}
+                    <b>Eingabe:</b> {dnInput}
+                  </div>
+                  <div>
+                    <b>Belegnummer:</b> {documentNumber || "—"}
+                  </div>
+                  <div>
+                    <b>Auftragsnummer:</b> {salesOrderNumber || "—"}
                   </div>
                   <div>
                     <b>Produkt(e):</b> {productNames.length ? productNames.join(" • ") : "—"}
@@ -1654,7 +1804,7 @@ if (!u) {
                 <Btn variant="outline" onClick={() => setShowPdfPreview(false)}>
                   Zurück
                 </Btn>
-                <Btn onClick={() => alert("Upload zu weclapp (Demo)")}>Upload zu weclapp</Btn>
+                <Btn onClick={() => alert("Upload zu weclapp (kommt als nächster Schritt).")}>Upload zu weclapp</Btn>
               </div>
             </div>
           </div>
