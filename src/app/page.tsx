@@ -189,7 +189,7 @@ function Chip({ children, tone = "muted" }: { children: React.ReactNode; tone?: 
     tone === "green"
       ? "bg-green-500/10 text-green-700 border-green-500/20 dark:text-green-200"
       : tone === "blue"
-      ? "bg-blue-500/10 text-blue-700 border-blue-500/20 dark:text-blue-200"
+      ? "bg-blue-500/10 text-blue-700 border-blue-500/20 dark:text-green-200"
       : "bg-neutral-500/10 text-neutral-700 border-neutral-500/20 dark:text-neutral-200";
   return <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${cls}`}>{children}</span>;
 }
@@ -440,8 +440,50 @@ export default function Page() {
     { key: "summary", label: "Zusammenfassung" },
   ];
 
+  // ✅ localStorage keys (MÜSSEN vor useEffect stehen)
+  const LS_USER_STATE = "nextwave_user_state_v1";
+  const LS_USER_OPERATOR = "nextwave_user_operator_v1";
+
   // ✅ layouts from lib (admin saves into LocalStorage, loadLayouts reads it)
   const [layouts, setLayouts] = useState<Layouts>(() => loadLayouts() as any);
+
+  // ✅ State: MUSS vor useEffects stehen, die es benutzen
+  const [step, setStep] = useState<Step>("delivery");
+  const [deviceType, setDeviceType] = useState<DeviceType>("mini");
+
+  // login gate
+  const [operator, setOperator] = useState<string>("");
+  const USERS: { name: string; email: string; password: string }[] = [
+    { name: "Mustafa Ergin", email: "mustafa@next-wave.tech", password: "NEXTWAVE123" },
+    { name: "Jonas Harlacher", email: "jonas@next-wave.tech", password: "NEXTWAVE123" },
+  ];
+  const [isAuthed, setIsAuthed] = useState(false);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+
+  // delivery / workflow state
+  const [dnInput, setDnInput] = useState("DN-2026-001");
+  const [dnLoaded, setDnLoaded] = useState(false);
+  const [customerName, setCustomerName] = useState<string>("");
+  const [productNames, setProductNames] = useState<string[]>([]);
+
+  const [expectedSerials, setExpectedSerials] = useState<string[]>([]);
+  const [rows, setRows] = useState<Row[]>([]);
+  const [activeIdx, setActiveIdx] = useState<number>(-1);
+
+  const [search, setSearch] = useState("");
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [autoAdvance, setAutoAdvance] = useState(false);
+
+  // UI
+  const [dark, setDark] = useState(false);
+
+  // summary / pdf
+  const [signatureInitials, setSignatureInitials] = useState<string>("");
+  const [signatureDataUrl, setSignatureDataUrl] = useState<string>("");
+  const [showPdfPreview, setShowPdfPreview] = useState(false);
 
   useEffect(() => {
     const onFocus = () => setLayouts(loadLayouts() as any);
@@ -449,7 +491,7 @@ export default function Page() {
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
-    // ✅ Restore UI + Session after reload (keine Abmeldung durch Reload)
+  // ✅ Restore UI + Session after reload (keine Abmeldung durch Reload)
   useEffect(() => {
     // 1) State restore (Arbeitsstand)
     try {
@@ -457,8 +499,8 @@ export default function Page() {
       if (raw) {
         const s = JSON.parse(raw);
 
-        if (typeof s.step === "string") setStep(s.step);
-        if (typeof s.deviceType === "string") setDeviceType(s.deviceType);
+        if (typeof s.step === "string") setStep(s.step as Step);
+        if (typeof s.deviceType === "string") setDeviceType(s.deviceType as DeviceType);
 
         if (typeof s.dnInput === "string") setDnInput(s.dnInput);
         if (typeof s.dnLoaded === "boolean") setDnLoaded(s.dnLoaded);
@@ -502,7 +544,7 @@ export default function Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-    // ✅ Persist Arbeitsstand automatisch (nur Reset darf löschen)
+  // ✅ Persist Arbeitsstand automatisch (nur Reset darf löschen)
   useEffect(() => {
     const t = window.setTimeout(() => {
       try {
@@ -552,46 +594,6 @@ export default function Page() {
     signatureDataUrl,
     showPdfPreview,
   ]);
-
-  const LS_USER_STATE = "nextwave_user_state_v1";
-  const LS_USER_OPERATOR = "nextwave_user_operator_v1";
-  
-  const [step, setStep] = useState<Step>("delivery");
-  const [deviceType, setDeviceType] = useState<DeviceType>("mini");
-
-  // login gate
-  const [operator, setOperator] = useState<string>("");
-  const USERS: { name: string; email: string; password: string }[] = [
-    { name: "Mustafa Ergin", email: "mustafa@next-wave.tech", password: "NEXTWAVE123" },
-    { name: "Jonas Harlacher", email: "jonas@next-wave.tech", password: "NEXTWAVE123" },
-  ];
-  const [isAuthed, setIsAuthed] = useState(false);
-  const [loginEmail, setLoginEmail] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
-  const [loginError, setLoginError] = useState<string | null>(null);
-  const [showPassword, setShowPassword] = useState(false);
-
-  // delivery / workflow state
-  const [dnInput, setDnInput] = useState("DN-2026-001");
-  const [dnLoaded, setDnLoaded] = useState(false);
-  const [customerName, setCustomerName] = useState<string>("");
-  const [productNames, setProductNames] = useState<string[]>([]);
-
-  const [expectedSerials, setExpectedSerials] = useState<string[]>([]);
-  const [rows, setRows] = useState<Row[]>([]);
-  const [activeIdx, setActiveIdx] = useState<number>(-1);
-
-  const [search, setSearch] = useState("");
-  const [scanError, setScanError] = useState<string | null>(null);
-  const [autoAdvance, setAutoAdvance] = useState(false);
-
-  // UI
-  const [dark, setDark] = useState(false);
-
-  // summary / pdf
-  const [signatureInitials, setSignatureInitials] = useState<string>("");
-  const [signatureDataUrl, setSignatureDataUrl] = useState<string>("");
-  const [showPdfPreview, setShowPdfPreview] = useState(false);
 
   const todayStr = useMemo(() => new Date().toLocaleDateString("de-DE"), []);
 
@@ -688,34 +690,33 @@ export default function Page() {
     if (step === "checks") focusScan();
   }, [step]);
 
- const resetAll = () => {
+  const resetAll = () => {
+    // ✅ gespeicherten Arbeitsstand wirklich löschen
+    try {
+      localStorage.removeItem("nextwave_user_state_v1");
+      localStorage.removeItem("nextwave_user_operator_v1");
+    } catch {
+      // ignore
+    }
 
-  // ✅ gespeicherten Arbeitsstand wirklich löschen
-  try {
-    localStorage.removeItem("nextwave_user_state_v1");
-    localStorage.removeItem("nextwave_user_operator_v1");
-  } catch {
-    // ignore
-  }
+    setStep("delivery");
 
-  setStep("delivery");
+    setDnLoaded(false);
+    setCustomerName("");
+    setExpectedSerials([]);
+    setRows([]);
+    setActiveIdx(-1);
+    setSearch("");
+    setScanError(null);
+    setAutoAdvance(false);
 
-  setDnLoaded(false);
-  setCustomerName("");
-  setExpectedSerials([]);
-  setRows([]);
-  setActiveIdx(-1);
-  setSearch("");
-  setScanError(null);
-  setAutoAdvance(false);
+    setProductNames([]);
+    setSignatureInitials("");
+    setSignatureDataUrl("");
+    setShowPdfPreview(false);
 
-  setProductNames([]);
-  setSignatureInitials("");
-  setSignatureDataUrl("");
-  setShowPdfPreview(false);
-
-  setDeviceType("mini");
-};
+    setDeviceType("mini");
+  };
 
   const doLogin = async () => {
     const email = loginEmail.trim().toLowerCase();
@@ -752,7 +753,7 @@ export default function Page() {
   };
 
   const setFieldValue = (key: string, value: any) => {
-  setRows((prev) => prev.map((x, i) => (i === activeIdx ? { ...x, [key]: value } : x)));
+    setRows((prev) => prev.map((x, i) => (i === activeIdx ? { ...x, [key]: value } : x)));
   };
 
   const downloadPdf = () => {
@@ -1103,28 +1104,36 @@ export default function Page() {
 
                   <div className="flex items-center gap-3 pt-2 flex-wrap justify-end">
                     <button
-  type="button"
-  onClick={async () => {
-    const ok = window.confirm(
-      "Bist du sicher, dass du dich abmelden willst?\n\nNicht übertragene Daten könnten verloren gehen, wenn du danach Reset machst oder den Browser-Cache löschst."
-    );
-    if (!ok) return;
+                      type="button"
+                      onClick={async () => {
+                        const ok = window.confirm(
+                          "Bist du sicher, dass du dich abmelden willst?\n\nNicht übertragene Daten könnten verloren gehen, wenn du danach Reset machst oder den Browser-Cache löschst."
+                        );
+                        if (!ok) return;
 
-    try {
-      await fetch("/api/auth/logout", { method: "POST" });
-    } catch {
-      // ignore
-    }
+                        try {
+                          await fetch("/api/auth/logout", { method: "POST" });
+                        } catch {
+                          // ignore
+                        }
 
-    // ✅ Nur Auth zurücksetzen, NICHT den Arbeitsstand löschen
-    setIsAuthed(false);
-    setLoginPassword("");
-    setLoginError(null);
-  }}
-  className="h-10 px-4 rounded-2xl border border-white/15 bg-white/10 text-white hover:bg-white/15 backdrop-blur text-sm font-semibold"
->
-  Abmelden
-</button>
+                        // ✅ Nur Auth zurücksetzen, NICHT den Arbeitsstand löschen
+                        setIsAuthed(false);
+                        setLoginPassword("");
+                        setLoginError(null);
+                      }}
+                      className="h-10 px-4 rounded-2xl border border-white/15 bg-white/10 text-white hover:bg-white/15 backdrop-blur text-sm font-semibold"
+                    >
+                      Abmelden
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={resetAll}
+                      className="h-10 px-4 rounded-2xl border border-white/15 bg-white/10 text-white hover:bg-white/15 backdrop-blur text-sm font-semibold"
+                    >
+                      Reset
+                    </button>
 
                     <button
                       type="button"
