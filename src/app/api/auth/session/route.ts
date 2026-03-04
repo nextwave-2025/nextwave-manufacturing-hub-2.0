@@ -7,35 +7,39 @@ function sign(value: string, secret: string) {
   return crypto.createHmac("sha256", secret).update(value).digest("hex");
 }
 
-function safeJsonParse(s: string) {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
-}
-
 export async function GET(req: Request) {
-  if (!SESSION_SECRET) {
-    return NextResponse.json({ ok: false, error: "Server not configured" }, { status: 500 });
+  try {
+    if (!SESSION_SECRET) {
+      return NextResponse.json({ ok: false, error: "Server not configured" }, { status: 500 });
+    }
+
+    const cookieHeader = req.headers.get("cookie") || "";
+    const match = cookieHeader.match(/(?:^|;\s*)nextwave_session=([^;]+)/);
+    if (!match) {
+      return NextResponse.json({ ok: false });
+    }
+
+    const token = decodeURIComponent(match[1]);
+    const parts = token.split(".");
+    if (parts.length !== 2) {
+      return NextResponse.json({ ok: false });
+    }
+
+    const [payloadB64, signature] = parts;
+    const payloadJson = Buffer.from(payloadB64, "base64").toString("utf8");
+
+    const expectedSig = sign(payloadJson, SESSION_SECRET);
+    if (signature !== expectedSig) {
+      return NextResponse.json({ ok: false });
+    }
+
+    // Optional: TTL prüfen (z.B. 7 Tage)
+    // const payload = JSON.parse(payloadJson);
+    // if (payload?.ts && Date.now() - payload.ts > 7 * 24 * 60 * 60 * 1000) return NextResponse.json({ ok: false });
+
+    const payload = JSON.parse(payloadJson);
+    return NextResponse.json({ ok: true, user: { email: payload?.email || "" } });
+  } catch {
+    return NextResponse.json({ ok: false });
   }
-
-  const cookie = req.headers.get("cookie") || "";
-  const match = cookie.match(/(?:^|;\s*)nextwave_session=([^;]+)/);
-  const token = match?.[1];
-
-  if (!token) return NextResponse.json({ ok: false }, { status: 200 });
-
-  const [payloadB64, signature] = token.split(".");
-  if (!payloadB64 || !signature) return NextResponse.json({ ok: false }, { status: 200 });
-
-  const payloadStr = Buffer.from(payloadB64, "base64").toString("utf8");
-  const expected = sign(payloadStr, SESSION_SECRET);
-
-  if (signature !== expected) return NextResponse.json({ ok: false }, { status: 200 });
-
-  const payload = safeJsonParse(payloadStr);
-  if (!payload?.email) return NextResponse.json({ ok: false }, { status: 200 });
-
-  return NextResponse.json({ ok: true, email: String(payload.email) }, { status: 200 });
 }
