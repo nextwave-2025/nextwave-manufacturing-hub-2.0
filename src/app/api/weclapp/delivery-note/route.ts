@@ -43,9 +43,22 @@ function inferDeviceType(productTitles: string[]) {
   return "mini";
 }
 
+// ✅ aus Weclapp Article-Objekt robust die Warengruppe/Artikelkategorie ziehen
+function getCategoryNameFromArticle(article: any): string {
+  return String(
+    article?.articleCategoryName ||
+      article?.articleCategory?.name ||
+      article?.articleCategory ||
+      "",
+  ).trim();
+}
+
 export async function GET(req: Request) {
   if (!WECLAPP_BASE_URL || !WECLAPP_API_TOKEN) {
-    return jsonError("Weclapp API nicht konfiguriert (WECLAPP_BASE_URL oder WECLAPP_API_TOKEN fehlt).", 500);
+    return jsonError(
+      "Weclapp API nicht konfiguriert (WECLAPP_BASE_URL oder WECLAPP_API_TOKEN fehlt).",
+      500,
+    );
   }
 
   const { searchParams } = new URL(req.url);
@@ -60,10 +73,13 @@ export async function GET(req: Request) {
     `${apiBase}/shipment?shipmentNumber=${encodeURIComponent(numberOrId)}`,
     `${apiBase}/shipment/id/${encodeURIComponent(numberOrId)}`,
 
-    // deliveryNote (falls ihr es nutzt)
+    // deliveryNote
     `${apiBase}/deliveryNote?deliveryNoteNumber=${encodeURIComponent(numberOrId)}`,
     `${apiBase}/deliveryNote/id/${encodeURIComponent(numberOrId)}`,
   ];
+
+  // ✅ NUR diese beiden Warengruppen zählen als Fertigungs-Devices
+  const ALLOWED_GROUPS = new Set<string>(["Barebone Mini-PC", "Rugged Tablet"]);
 
   for (const url of tryUrls) {
     const r = await weclappGet(url);
@@ -76,10 +92,10 @@ export async function GET(req: Request) {
 
     const entity = url.includes("/shipment") ? "shipment" : "deliveryNote";
 
-    // ✅ Items normalisieren (Shipment / DeliveryNote)
+    // ✅ Items normalisieren
     const items: any[] = obj?.shipmentItems || obj?.deliveryNoteItems || obj?.items || [];
 
-    // ✅ customerName robust (bei dir: recipientAddress.company = 4xperts GmbH)
+    // ✅ customerName robust
     const customerName: string =
       obj?.customerName ||
       obj?.customer?.name ||
@@ -94,29 +110,100 @@ export async function GET(req: Request) {
         .filter((v: string) => Boolean(v)),
     );
 
-    // ✅ serials aus picks: garantiert string[]
-    const serials: string[] = uniq(
+    // ✅ serials grouped by product title (Positionen)
+    const serialsByProduct: Record<string, string[]> = {};
+    for (const it of items) {
+      const title = String(it?.title || it?.articleName || "").trim();
+      if (!title) continue;
+
+      const picks = Array.isArray(it?.picks) ? it.picks : [];
+      const serials = uniq(
+        picks
+          .flatMap((p: any) => (Array.isArray(p?.serialNumbers) ? p.serialNumbers : []))
+          .map((x: any) => String(x || "").trim())
+          .filter((v: string) => Boolean(v)),
+      );
+
+      if (serials.length) serialsByProduct[title] = serials;
+    }
+
+    const serials: string[] = uniq(Object.values(serialsByProduct).flat());
+
+    // ✅ Warengruppe je articleId nachladen (damit wir NICHT nach Namen filtern)
+    const articleIds: string[] = uniq(
       items
-        .flatMap((it: any) => (Array.isArray(it?.picks) ? it.picks : []))
-        .flatMap((p: any) => (Array.isArray(p?.serialNumbers) ? p.serialNumbers : []))
-        .map((x: any) => String(x || "").trim())
+        .map((it: any) => String(it?.articleId || "").trim())
         .filter((v: string) => Boolean(v)),
     );
 
+    const articleCategoryById = new Map<string, string>();
+
+    // parallel laden
+    await Promise.all(
+      articleIds.map(async (id) => {
+        const ar = await weclappGet(`${apiBase}/article/id/${encodeURIComponent(id)}`);
+        if (!ar.ok) return;
+        const catName = getCategoryNameFromArticle(ar.json);
+        if (catName) articleCategoryById.set(id, catName);
+      }),
+    );
+
+    // ✅ devices aus genau den beiden Warengruppen
+    const deviceItems = items
+      .map((it: any) => {
+        const articleId = String(it?.articleId || "").trim();
+        const title = String(it?.title || it?.articleName || "").trim();
+        const categoryName = articleId ? articleCategoryById.get(articleId) || "" : "";
+
+        const picks = Array.isArray(it?.picks) ? it.picks : [];
+        const itemSerials = uniq(
+          picks
+            .flatMap((p: any) => (Array.isArray(p?.serialNumbers) ? p.serialNumbers : []))
+            .map((x: any) => String(x || "").trim())
+            .filter((v: string) => Boolean(v)),
+        );
+
+        return { articleId, title, categoryName, serials: itemSerials };
+      })
+      .filter((x) => Boolean(x.title) && x.serials.length > 0);
+
+    const deviceSerials: string[] = uniq(
+      deviceItems
+        .filter((x) => ALLOWED_GROUPS.has(x.categoryName))
+        .flatMap((x) => x.serials),
+    );
+
     const deviceType = inferDeviceType(productNames);
+
+    // ✅ nützliche Nummern für UI
+    const documentNumber: string =
+      obj?.shipmentNumber || obj?.deliveryNoteNumber || obj?.number || "";
+
+    const salesOrderNumber: string = obj?.salesOrderNumber || "";
 
     return NextResponse.json({
       ok: true,
       entity,
       input: numberOrId,
 
-      // ✅ genau das, was dein UI braucht
+      documentNumber,
+      salesOrderNumber,
+
       customerName,
       productNames,
+
       serials,
+      serialsByProduct,
+
+      // ✅ neu: pro Position inkl. Warengruppe
+      deviceItems,
+
+      // ✅ das ist das, was deine Fertigung wirklich braucht:
+      // nur S/N aus Warengruppe "Barebone Mini-PC" und "Rugged Tablet"
+      deviceSerials,
+
       deviceType,
 
-      // optional zum Debuggen
       raw: obj,
     });
   }
