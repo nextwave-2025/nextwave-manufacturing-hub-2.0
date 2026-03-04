@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Plus, Save, Trash2, RefreshCcw, Pencil, Eye, EyeOff } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, Save, Trash2, RefreshCcw, Pencil, Eye, EyeOff, X } from "lucide-react";
 import { DEFAULT_LAYOUTS, FieldDef, GroupKey, LayoutConfig, loadLayouts, resetLayouts, saveLayouts, Yn } from "../../lib/layoutConfig";
 
 const ORANGE = "#f15124";
@@ -76,6 +76,21 @@ export default function AdminPage() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
 
+  // ✅ Session Restore: Bei Reload eingeloggt bleiben, wenn Cookie noch gültig ist
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/auth/session", { method: "GET", cache: "no-store" });
+        const j = await r.json().catch(() => ({}));
+        if ((j as any)?.ok) {
+          setIsAuthed(true);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  }, []);
+
   const doLogin = async () => {
     setLoginError(null);
 
@@ -103,6 +118,24 @@ export default function AdminPage() {
     }
   };
 
+  // ✅ Logout (nur Session weg, keine Layout-Daten löschen!)
+  const doLogout = async () => {
+    const ok = window.confirm(
+      "Bist du sicher, dass du dich abmelden willst?\n\nNicht gespeicherte Änderungen könnten verloren gehen."
+    );
+    if (!ok) return;
+
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // ignore
+    }
+
+    setIsAuthed(false);
+    setLoginPassword("");
+    setLoginError(null);
+  };
+
   // ======== DEIN BESTEHENDER ADMIN-CODE (UNVERÄNDERT) ========
   const [group, setGroup] = useState<GroupKey>("mini");
   const [layouts, setLayouts] = useState<Record<GroupKey, LayoutConfig> | null>(null);
@@ -112,6 +145,17 @@ export default function AdminPage() {
   useEffect(() => {
     setLayouts(loadLayouts());
   }, []);
+
+  // ✅ Auto-Persist (Cache): Jede Änderung an layouts wird automatisch in LocalStorage gespeichert.
+  // Reset passiert weiterhin nur über "Reset Default".
+  useEffect(() => {
+    if (!layouts) return;
+    try {
+      saveLayouts(layouts);
+    } catch {
+      // ignore
+    }
+  }, [layouts]);
 
   const cfg = useMemo(() => {
     if (!layouts) return null;
@@ -409,6 +453,12 @@ export default function AdminPage() {
               </div>
 
               <div className="flex gap-2">
+                {/* ✅ Abmelden-Button in der gleichen Leiste (wie Screenshot) */}
+                <Btn variant="outline" onClick={doLogout}>
+                  <X className="h-4 w-4 mr-2" />
+                  Abmelden
+                </Btn>
+
                 <Btn variant="outline" onClick={addSection}>
                   <Plus className="h-4 w-4 mr-2" />+ Section
                 </Btn>
