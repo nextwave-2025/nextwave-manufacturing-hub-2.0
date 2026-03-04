@@ -722,11 +722,11 @@ export default function Page() {
     const email = loginEmail.trim().toLowerCase();
     const pw = loginPassword;
 
-    const u = USERS.find((x) => x.email.toLowerCase() === email && x.password === pw);
-    if (!u) {
-      setLoginError("Login fehlgeschlagen. Bitte E-Mail/Passwort prüfen.");
-      return;
-    }
+   const u = USERS.find((x) => x.email.toLowerCase() === email);
+if (!u) {
+  setLoginError("Login fehlgeschlagen. Bitte E-Mail prüfen.");
+  return;
+}
 
     try {
       // ✅ Serverseitig Cookie setzen
