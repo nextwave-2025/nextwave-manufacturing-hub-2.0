@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-const WECLAPP_BASE_URL = process.env.WECLAPP_BASE_URL; // z.B. https://xxx.weclapp.com  ODER inkl. /webapp/api/v1
+const WECLAPP_BASE_URL = process.env.WECLAPP_BASE_URL;
 const WECLAPP_API_TOKEN = process.env.WECLAPP_API_TOKEN;
 
 function jsonError(msg: string, status = 500, extra?: any) {
@@ -8,10 +8,9 @@ function jsonError(msg: string, status = 500, extra?: any) {
 }
 
 function buildApiBase(base: string) {
-  const b = base.replace(/\/$/, "");
-  // Wenn schon /webapp/api/v1 drin ist, nicht nochmal anhängen
-  if (b.includes("/webapp/api/v1")) return b;
-  return b + "/webapp/api/v1";
+  // ✅ robust: egal ob base nur Domain ist oder schon /webapp/api/v2 enthält
+  const u = new URL(base);
+  return `${u.origin}/webapp/api/v1`;
 }
 
 async function weclappGet(url: string) {
@@ -41,50 +40,48 @@ export async function GET(req: Request) {
   }
 
   const { searchParams } = new URL(req.url);
-  const deliveryNumber = (searchParams.get("number") || "").trim();
+  const numberOrId = (searchParams.get("number") || "").trim();
 
-  if (!deliveryNumber) {
+  if (!numberOrId) {
     return jsonError("Query-Parameter 'number' fehlt.", 400);
   }
 
   const apiBase = buildApiBase(WECLAPP_BASE_URL);
 
-  // Versuch A: shipment (Weclapp Lieferschein/Warenausgang ist sehr oft shipment)
-  const urlShipment = `${apiBase}/shipment?shipmentNumber=${encodeURIComponent(deliveryNumber)}`;
-  const a = await weclappGet(urlShipment);
+  // ✅ wir probieren BOTH: Suche über Number-Parameter UND direkter /id/<id>
+  const tried: any[] = [];
 
-  if (a.ok) {
-    const note = Array.isArray(a.json?.result) ? a.json.result[0] : a.json;
-    if (!note) return jsonError(`Kein Shipment gefunden für Nummer: ${deliveryNumber}`, 404);
-    const customerName = note?.customerName || note?.customer?.name || "";
-    const items = note?.shipmentItems || note?.items || [];
-    return NextResponse.json({ ok: true, entity: "shipment", deliveryNumber, customerName, items, raw: note });
+  const tryUrls = [
+    // shipment
+    `${apiBase}/shipment?shipmentNumber=${encodeURIComponent(numberOrId)}`,
+    `${apiBase}/shipment/id/${encodeURIComponent(numberOrId)}`,
+
+    // deliveryNote
+    `${apiBase}/deliveryNote?deliveryNoteNumber=${encodeURIComponent(numberOrId)}`,
+    `${apiBase}/deliveryNote/id/${encodeURIComponent(numberOrId)}`,
+  ];
+
+  for (const url of tryUrls) {
+    const r = await weclappGet(url);
+    tried.push({ url, status: r.status, bodyPreview: (r.text || "").slice(0, 300) });
+
+    if (r.ok) {
+      const obj = Array.isArray(r.json?.result) ? r.json.result[0] : r.json;
+      if (!obj) continue;
+
+      const customerName = obj?.customerName || obj?.customer?.name || "";
+      const items = obj?.shipmentItems || obj?.deliveryNoteItems || obj?.items || [];
+
+      // entity name nur grob aus URL ableiten
+      const entity = url.includes("/shipment") ? "shipment" : "deliveryNote";
+
+      return NextResponse.json({ ok: true, entity, numberOrId, customerName, items, raw: obj });
+    }
   }
 
-  // Wenn Endpoint 404 -> sehr wahrscheinlich falsche Entity, dann Versuch B: deliveryNote
-  const urlDeliveryNote = `${apiBase}/deliveryNote?deliveryNoteNumber=${encodeURIComponent(deliveryNumber)}`;
-  const b = await weclappGet(urlDeliveryNote);
-
-  if (b.ok) {
-    const note = Array.isArray(b.json?.result) ? b.json.result[0] : b.json;
-    if (!note) return jsonError(`Kein DeliveryNote gefunden für Nummer: ${deliveryNumber}`, 404);
-    const customerName = note?.customerName || note?.customer?.name || "";
-    const items = note?.deliveryNoteItems || note?.items || [];
-    return NextResponse.json({ ok: true, entity: "deliveryNote", deliveryNumber, customerName, items, raw: note });
-  }
-
-  // Debug-Ausgabe, damit wir 100% sehen was Weclapp ablehnt
   return jsonError(
     "Weclapp Request fehlgeschlagen (siehe debug).",
     502,
-    {
-      debug: {
-        apiBase,
-        tried: [
-          { url: urlShipment, status: a.status, bodyPreview: (a.text || "").slice(0, 300) },
-          { url: urlDeliveryNote, status: b.status, bodyPreview: (b.text || "").slice(0, 300) },
-        ],
-      },
-    }
+    { debug: { apiBase, tried } }
   );
 }
