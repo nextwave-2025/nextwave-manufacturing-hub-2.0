@@ -33,7 +33,7 @@ async function weclappGet(url: string) {
   return { ok: r.ok, status: r.status, text, json };
 }
 
-function uniq<T>(arr: T[]) {
+function uniq<T>(arr: readonly T[]) {
   return Array.from(new Set(arr));
 }
 
@@ -45,7 +45,10 @@ function inferDeviceType(productTitles: string[]) {
 
 export async function GET(req: Request) {
   if (!WECLAPP_BASE_URL || !WECLAPP_API_TOKEN) {
-    return jsonError("Weclapp API nicht konfiguriert (WECLAPP_BASE_URL oder WECLAPP_API_TOKEN fehlt).", 500);
+    return jsonError(
+      "Weclapp API nicht konfiguriert (WECLAPP_BASE_URL oder WECLAPP_API_TOKEN fehlt).",
+      500,
+    );
   }
 
   const { searchParams } = new URL(req.url);
@@ -77,29 +80,30 @@ export async function GET(req: Request) {
     const entity = url.includes("/shipment") ? "shipment" : "deliveryNote";
 
     // ✅ Items normalisieren
-    const items = obj?.shipmentItems || obj?.deliveryNoteItems || obj?.items || [];
+    const items: any[] = obj?.shipmentItems || obj?.deliveryNoteItems || obj?.items || [];
 
     // ✅ customerName robust: shipment hat oft recipientAddress.company
-    const customerName =
+    const customerName: string =
       obj?.customerName ||
       obj?.customer?.name ||
       obj?.recipientAddress?.company ||
       obj?.invoiceAddress?.company ||
       "";
 
-    // ✅ product names
-    const productNames = uniq(
-      (items || [])
-        .map((it: any) => (it?.title || it?.articleName || "").trim())
-        .filter(Boolean),
+    // ✅ product names: garantiert string[]
+    const productNames: string[] = uniq(
+      (items as any[])
+        .map((it: any) => String(it?.title || it?.articleName || "").trim())
+        .filter((v: string) => Boolean(v)),
     );
 
-    // ✅ serials aus picks
-    const serials = uniq(
-      (items || [])
-        .flatMap((it: any) => (it?.picks || []).flatMap((p: any) => p?.serialNumbers || []))
+    // ✅ serials aus picks: garantiert string[]
+    const serials: string[] = uniq(
+      (items as any[])
+        .flatMap((it: any) => (Array.isArray(it?.picks) ? it.picks : []))
+        .flatMap((p: any) => (Array.isArray(p?.serialNumbers) ? p.serialNumbers : []))
         .map((x: any) => String(x || "").trim())
-        .filter(Boolean),
+        .filter((v: string) => Boolean(v)),
     );
 
     const deviceType = inferDeviceType(productNames);
