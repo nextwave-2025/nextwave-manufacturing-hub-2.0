@@ -8,7 +8,6 @@ function jsonError(msg: string, status = 500, extra?: any) {
 }
 
 function buildApiBase(base: string) {
-  // ✅ robust: egal ob base nur Domain ist oder schon /webapp/api/v2 enthält
   const u = new URL(base);
   return `${u.origin}/webapp/api/v1`;
 }
@@ -34,6 +33,16 @@ async function weclappGet(url: string) {
   return { ok: r.ok, status: r.status, text, json };
 }
 
+function uniq<T>(arr: T[]) {
+  return Array.from(new Set(arr));
+}
+
+function inferDeviceType(productTitles: string[]) {
+  const s = productTitles.join(" ").toUpperCase();
+  if (s.includes("WAVETAB") || s.includes("RUGGED") || s.includes("TABLET")) return "rugged";
+  return "mini";
+}
+
 export async function GET(req: Request) {
   if (!WECLAPP_BASE_URL || !WECLAPP_API_TOKEN) {
     return jsonError("Weclapp API nicht konfiguriert (WECLAPP_BASE_URL oder WECLAPP_API_TOKEN fehlt).", 500);
@@ -41,47 +50,75 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const numberOrId = (searchParams.get("number") || "").trim();
-
-  if (!numberOrId) {
-    return jsonError("Query-Parameter 'number' fehlt.", 400);
-  }
+  if (!numberOrId) return jsonError("Query-Parameter 'number' fehlt.", 400);
 
   const apiBase = buildApiBase(WECLAPP_BASE_URL);
 
-  // ✅ wir probieren BOTH: Suche über Number-Parameter UND direkter /id/<id>
   const tried: any[] = [];
-
   const tryUrls = [
     // shipment
     `${apiBase}/shipment?shipmentNumber=${encodeURIComponent(numberOrId)}`,
     `${apiBase}/shipment/id/${encodeURIComponent(numberOrId)}`,
 
-    // deliveryNote
+    // deliveryNote (falls ihr es nutzt)
     `${apiBase}/deliveryNote?deliveryNoteNumber=${encodeURIComponent(numberOrId)}`,
     `${apiBase}/deliveryNote/id/${encodeURIComponent(numberOrId)}`,
   ];
 
   for (const url of tryUrls) {
     const r = await weclappGet(url);
-    tried.push({ url, status: r.status, bodyPreview: (r.text || "").slice(0, 300) });
+    tried.push({ url, status: r.status, bodyPreview: (r.text || "").slice(0, 200) });
 
-    if (r.ok) {
-      const obj = Array.isArray(r.json?.result) ? r.json.result[0] : r.json;
-      if (!obj) continue;
+    if (!r.ok) continue;
 
-      const customerName = obj?.customerName || obj?.customer?.name || "";
-      const items = obj?.shipmentItems || obj?.deliveryNoteItems || obj?.items || [];
+    const obj = Array.isArray(r.json?.result) ? r.json.result[0] : r.json;
+    if (!obj) continue;
 
-      // entity name nur grob aus URL ableiten
-      const entity = url.includes("/shipment") ? "shipment" : "deliveryNote";
+    const entity = url.includes("/shipment") ? "shipment" : "deliveryNote";
 
-      return NextResponse.json({ ok: true, entity, numberOrId, customerName, items, raw: obj });
-    }
+    // ✅ Items normalisieren
+    const items = obj?.shipmentItems || obj?.deliveryNoteItems || obj?.items || [];
+
+    // ✅ customerName robust: shipment hat oft recipientAddress.company
+    const customerName =
+      obj?.customerName ||
+      obj?.customer?.name ||
+      obj?.recipientAddress?.company ||
+      obj?.invoiceAddress?.company ||
+      "";
+
+    // ✅ product names
+    const productNames = uniq(
+      (items || [])
+        .map((it: any) => (it?.title || it?.articleName || "").trim())
+        .filter(Boolean),
+    );
+
+    // ✅ serials aus picks
+    const serials = uniq(
+      (items || [])
+        .flatMap((it: any) => (it?.picks || []).flatMap((p: any) => p?.serialNumbers || []))
+        .map((x: any) => String(x || "").trim())
+        .filter(Boolean),
+    );
+
+    const deviceType = inferDeviceType(productNames);
+
+    return NextResponse.json({
+      ok: true,
+      entity,
+      input: numberOrId,
+
+      // ✅ genau das, was dein UI braucht
+      customerName,
+      productNames,
+      serials,
+      deviceType,
+
+      // optional zum Debuggen
+      raw: obj,
+    });
   }
 
-  return jsonError(
-    "Weclapp Request fehlgeschlagen (siehe debug).",
-    502,
-    { debug: { apiBase, tried } }
-  );
+  return jsonError("Weclapp Request fehlgeschlagen (siehe debug).", 502, { debug: { apiBase, tried } });
 }
