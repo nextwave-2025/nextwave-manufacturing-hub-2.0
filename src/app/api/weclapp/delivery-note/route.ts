@@ -33,7 +33,7 @@ async function weclappGet(url: string) {
   return { ok: r.ok, status: r.status, text, json };
 }
 
-function uniq<T>(arr: readonly T[]) {
+function uniq<T>(arr: readonly T[]): T[] {
   return Array.from(new Set(arr));
 }
 
@@ -103,7 +103,7 @@ export async function GET(req: Request) {
       obj?.invoiceAddress?.company ||
       "";
 
-    // ✅ product names: garantiert string[]
+    // ✅ product names
     const productNames: string[] = uniq(
       items
         .map((it: any) => String(it?.title || it?.articleName || "").trim())
@@ -112,24 +112,28 @@ export async function GET(req: Request) {
 
     // ✅ serials grouped by product title (Positionen)
     const serialsByProduct: Record<string, string[]> = {};
+
     for (const it of items) {
       const title = String(it?.title || it?.articleName || "").trim();
       if (!title) continue;
 
       const picks = Array.isArray(it?.picks) ? it.picks : [];
-      const serials = uniq(
+
+      // ✅ HIER ist der entscheidende Fix:
+      // wir erzeugen explizit string[] und geben uniq<string> damit es NICHT unknown[] wird
+      const serials: string[] = uniq<string>(
         picks
           .flatMap((p: any) => (Array.isArray(p?.serialNumbers) ? p.serialNumbers : []))
           .map((x: any) => String(x || "").trim())
           .filter((v: string) => Boolean(v)),
       );
 
-      if (serials.length) serialsByProduct[title] = serials;
+      if (serials.length > 0) serialsByProduct[title] = serials;
     }
 
-    const serials: string[] = uniq(Object.values(serialsByProduct).flat());
+    const serials: string[] = uniq<string>(Object.values(serialsByProduct).flat());
 
-    // ✅ Warengruppe je articleId nachladen (damit wir NICHT nach Namen filtern)
+    // ✅ Warengruppe je articleId nachladen
     const articleIds: string[] = uniq(
       items
         .map((it: any) => String(it?.articleId || "").trim())
@@ -138,7 +142,6 @@ export async function GET(req: Request) {
 
     const articleCategoryById = new Map<string, string>();
 
-    // parallel laden
     await Promise.all(
       articleIds.map(async (id) => {
         const ar = await weclappGet(`${apiBase}/article/id/${encodeURIComponent(id)}`);
@@ -148,15 +151,20 @@ export async function GET(req: Request) {
       }),
     );
 
-    // ✅ devices aus genau den beiden Warengruppen
-    const deviceItems = items
+    // ✅ deviceItems inkl. Warengruppe
+    const deviceItems: Array<{
+      articleId: string;
+      title: string;
+      categoryName: string;
+      serials: string[];
+    }> = items
       .map((it: any) => {
         const articleId = String(it?.articleId || "").trim();
         const title = String(it?.title || it?.articleName || "").trim();
         const categoryName = articleId ? articleCategoryById.get(articleId) || "" : "";
 
         const picks = Array.isArray(it?.picks) ? it.picks : [];
-        const itemSerials = uniq(
+        const itemSerials: string[] = uniq<string>(
           picks
             .flatMap((p: any) => (Array.isArray(p?.serialNumbers) ? p.serialNumbers : []))
             .map((x: any) => String(x || "").trim())
@@ -167,7 +175,8 @@ export async function GET(req: Request) {
       })
       .filter((x) => Boolean(x.title) && x.serials.length > 0);
 
-    const deviceSerials: string[] = uniq(
+    // ✅ nur S/N aus den 2 Warengruppen
+    const deviceSerials: string[] = uniq<string>(
       deviceItems
         .filter((x) => ALLOWED_GROUPS.has(x.categoryName))
         .flatMap((x) => x.serials),
@@ -175,7 +184,6 @@ export async function GET(req: Request) {
 
     const deviceType = inferDeviceType(productNames);
 
-    // ✅ nützliche Nummern für UI
     const documentNumber: string =
       obj?.shipmentNumber || obj?.deliveryNoteNumber || obj?.number || "";
 
@@ -195,11 +203,10 @@ export async function GET(req: Request) {
       serials,
       serialsByProduct,
 
-      // ✅ neu: pro Position inkl. Warengruppe
+      // ✅ neu: Positionen inkl. Warengruppe
       deviceItems,
 
-      // ✅ das ist das, was deine Fertigung wirklich braucht:
-      // nur S/N aus Warengruppe "Barebone Mini-PC" und "Rugged Tablet"
+      // ✅ nur relevante Seriennummern für Fertigung
       deviceSerials,
 
       deviceType,
@@ -208,5 +215,7 @@ export async function GET(req: Request) {
     });
   }
 
-  return jsonError("Weclapp Request fehlgeschlagen (siehe debug).", 502, { debug: { apiBase, tried } });
+  return jsonError("Weclapp Request fehlgeschlagen (siehe debug).", 502, {
+    debug: { apiBase, tried },
+  });
 }
