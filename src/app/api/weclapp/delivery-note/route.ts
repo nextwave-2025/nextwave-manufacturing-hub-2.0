@@ -62,10 +62,6 @@ function deviceTypeFromGroupName(groupName: string | undefined | null): DeviceTy
   return null;
 }
 
-/**
- * ✅ Weclapp-Listen können "unscharf" matchen.
- * Daher: Ergebnisliste IMMER auf exakte Nummer filtern.
- */
 function pickExactByNumber(entity: "shipment" | "deliveryNote", inputNumber: string, result: any[]): any | null {
   const key = entity === "shipment" ? "shipmentNumber" : "deliveryNoteNumber";
   const exact = (result || []).find((x) => String(x?.[key] ?? "").trim() === inputNumber);
@@ -95,7 +91,6 @@ export async function GET(req: Request) {
 
     if (!r.ok) continue;
 
-    // ✅ Ergebnis normalisieren und EXAKT matchen
     const list = Array.isArray(r.json?.result) ? r.json.result : Array.isArray(r.json) ? r.json : [];
     const obj = pickExactByNumber(t.entity, documentNumber, list);
     if (!obj) continue;
@@ -131,28 +126,26 @@ export async function GET(req: Request) {
       const title = String((it?.title || it?.articleName || "") ?? "").trim();
       if (!title) continue;
 
-      const serials = uniqStrings(
-        (it?.picks || []).flatMap((p: any) => (p?.serialNumbers || []) as unknown[]),
-      );
-
-      if (serials.length) serialsByProduct[title] = serials;
+      const sers = uniqStrings((it?.picks || []).flatMap((p: any) => (p?.serialNumbers || []) as unknown[]));
+      if (sers.length) serialsByProduct[title] = sers;
     }
 
     const serials: string[] = uniqStrings(Object.values(serialsByProduct).flat());
 
-    // ✅ Artikel + Kategorie sicher auflösen (article -> articleCategoryId -> articleCategoryName)
+    // ✅ caches
     const articleCache = new Map<string, any>();
     const categoryCache = new Map<string, { id: string; name: string }>();
 
-    async function getArticle(articleId: string) {
+    // ✅ ES5-safe: arrow functions instead of function declarations inside block
+    const getArticle = async (articleId: string) => {
       if (articleCache.has(articleId)) return articleCache.get(articleId);
       const ar = await weclappGet(`${apiBase}/article/id/${encodeURIComponent(articleId)}`);
       const art = ar.ok ? ar.json : null;
       articleCache.set(articleId, art);
       return art;
-    }
+    };
 
-    async function getCategoryName(categoryId: string): Promise<string> {
+    const getCategoryName = async (categoryId: string): Promise<string> => {
       const cid = String(categoryId ?? "").trim();
       if (!cid) return "";
       if (categoryCache.has(cid)) return categoryCache.get(cid)!.name;
@@ -161,7 +154,7 @@ export async function GET(req: Request) {
       const name = cr.ok ? String(cr.json?.name ?? cr.json?.articleCategoryName ?? "").trim() : "";
       categoryCache.set(cid, { id: cid, name });
       return name;
-    }
+    };
 
     const deviceItemsAll: Array<{
       articleId: string;
@@ -197,13 +190,11 @@ export async function GET(req: Request) {
     }
 
     const deviceItems = deviceItemsAll.filter((x) => isAllowedGroupName(x.categoryName));
-
     const detectedGroup = deviceItems[0]?.categoryName || "";
     const deviceType: DeviceType = deviceTypeFromGroupName(detectedGroup) || "mini";
 
     const deviceSerials = uniqStrings(deviceItems.flatMap((x) => x.serials as unknown[]));
 
-    // ✅ Ganz wichtig: wenn wir keine relevanten Geräte finden -> NICHT alles nehmen, sondern Fehler anzeigen
     if (!deviceItems.length || !deviceSerials.length) {
       return jsonError(
         "Keine relevanten Geräte (Warengruppe Barebone Mini-PC / Rugged Tablet) im Beleg gefunden.",
@@ -214,7 +205,7 @@ export async function GET(req: Request) {
           documentNumber: resolvedDocumentNumber,
           customerName,
           debug: {
-            hint: "Prüfe, ob die Artikel im Lieferschein eine Warengruppe (Artikelkategorie) haben und ob sie exakt 'Barebone Mini-PC' oder 'Rugged Tablet' heißt.",
+            hint: "Prüfe die Artikelkategorie (Warengruppe) in weclapp. Erwartet exakt: 'Barebone Mini-PC' oder 'Rugged Tablet'.",
             deviceItemsAllPreview: deviceItemsAll.slice(0, 10),
           },
         },
@@ -229,12 +220,12 @@ export async function GET(req: Request) {
       salesOrderNumber,
       customerName,
 
-      // optional (kann UI verstecken)
+      // optional (UI kann das ausblenden)
       productNames,
       serials,
       serialsByProduct,
 
-      // ✅ das ist das Wichtige für SaaS
+      // ✅ relevant fürs SaaS
       deviceItems,
       deviceSerials,
       deviceType,
