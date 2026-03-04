@@ -49,12 +49,13 @@ export async function POST(req: Request) {
 
   const response = NextResponse.json({ success: true });
 
-  response.cookies.set("nextwave_session", token, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "strict",
-    path: "/",
-  });
+ response.cookies.set("nextwave_session", token, {
+  httpOnly: true,
+  secure: true,
+  sameSite: "strict",
+  path: "/",
+  maxAge: 60 * 60 * 24 * 7, // 7 Tage
+});
 
   return response;
 }
