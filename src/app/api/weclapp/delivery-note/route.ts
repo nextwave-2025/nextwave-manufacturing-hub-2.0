@@ -62,46 +62,46 @@ function deviceTypeFromGroupName(groupName: string | undefined | null): DeviceTy
   return null;
 }
 
+/**
+ * ✅ Weclapp-Listen können "unscharf" matchen.
+ * Daher: Ergebnisliste IMMER auf exakte Nummer filtern.
+ */
+function pickExactByNumber(entity: "shipment" | "deliveryNote", inputNumber: string, result: any[]): any | null {
+  const key = entity === "shipment" ? "shipmentNumber" : "deliveryNoteNumber";
+  const exact = (result || []).find((x) => String(x?.[key] ?? "").trim() === inputNumber);
+  return exact || null;
+}
+
 export async function GET(req: Request) {
   if (!WECLAPP_BASE_URL || !WECLAPP_API_TOKEN) {
     return jsonError("Weclapp API nicht konfiguriert (WECLAPP_BASE_URL oder WECLAPP_API_TOKEN fehlt).", 500);
   }
 
   const { searchParams } = new URL(req.url);
-
-  /**
-   * ✅ WICHTIG:
-   * Wir akzeptieren hier bewusst NUR die Belegnummer (z.B. shipmentNumber / deliveryNoteNumber).
-   * Keine ID-Fallbacks mehr, damit NICHT "irgendein" Datensatz gematcht wird.
-   */
   const documentNumber = (searchParams.get("number") || "").trim();
   if (!documentNumber) return jsonError("Query-Parameter 'number' fehlt.", 400);
 
   const apiBase = buildApiBase(WECLAPP_BASE_URL);
 
   const tried: any[] = [];
-
-  // ✅ Nur exakte Belegnummern-Search (kein /id/ Fallback!)
   const tryUrls = [
-    `${apiBase}/shipment?shipmentNumber=${encodeURIComponent(documentNumber)}`,
-    `${apiBase}/deliveryNote?deliveryNoteNumber=${encodeURIComponent(documentNumber)}`,
+    { entity: "shipment" as const, url: `${apiBase}/shipment?shipmentNumber=${encodeURIComponent(documentNumber)}` },
+    { entity: "deliveryNote" as const, url: `${apiBase}/deliveryNote?deliveryNoteNumber=${encodeURIComponent(documentNumber)}` },
   ];
 
-  for (const url of tryUrls) {
-    const r = await weclappGet(url);
-    tried.push({ url, status: r.status, bodyPreview: (r.text || "").slice(0, 200) });
+  for (const t of tryUrls) {
+    const r = await weclappGet(t.url);
+    tried.push({ url: t.url, status: r.status, bodyPreview: (r.text || "").slice(0, 200) });
 
     if (!r.ok) continue;
 
-    const obj = Array.isArray(r.json?.result) ? r.json.result[0] : r.json;
+    // ✅ Ergebnis normalisieren und EXAKT matchen
+    const list = Array.isArray(r.json?.result) ? r.json.result : Array.isArray(r.json) ? r.json : [];
+    const obj = pickExactByNumber(t.entity, documentNumber, list);
     if (!obj) continue;
 
-    const entity = url.includes("/shipment") ? "shipment" : "deliveryNote";
-
-    // ✅ Items normalisieren
     const items: any[] = obj?.shipmentItems || obj?.deliveryNoteItems || obj?.items || [];
 
-    // ✅ customerName robust
     const customerName =
       obj?.customerName ||
       obj?.customer?.name ||
@@ -109,9 +109,8 @@ export async function GET(req: Request) {
       obj?.invoiceAddress?.company ||
       "";
 
-    // ✅ Belegnummer + Auftragsnummer (wenn vorhanden)
     const resolvedDocumentNumber =
-      obj?.shipmentNumber || obj?.deliveryNoteNumber || obj?.documentNumber || documentNumber;
+      (t.entity === "shipment" ? obj?.shipmentNumber : obj?.deliveryNoteNumber) || documentNumber;
 
     const salesOrderNumber =
       obj?.salesOrderNumber ||
@@ -121,16 +120,13 @@ export async function GET(req: Request) {
       obj?.salesOrders?.[0]?.id ||
       "";
 
-    // ✅ product names (alle Positionen)
     const productNames: string[] = uniq(
       (items || [])
         .map((it: any) => String((it?.title || it?.articleName || "") ?? "").trim())
         .filter((s: string) => s.length > 0),
     );
 
-    // ✅ serialsByProduct: strikt typisiert, damit kein TS-unknown[] Fehler mehr entsteht
     const serialsByProduct: SerialMap = {};
-
     for (const it of items || []) {
       const title = String((it?.title || it?.articleName || "") ?? "").trim();
       if (!title) continue;
@@ -139,28 +135,41 @@ export async function GET(req: Request) {
         (it?.picks || []).flatMap((p: any) => (p?.serialNumbers || []) as unknown[]),
       );
 
-      if (serials.length) serialsByProduct[title] = serials; // ✅ string[] passt
+      if (serials.length) serialsByProduct[title] = serials;
     }
 
-    // ✅ Gesamt-Serials (alle Positionen)
     const serials: string[] = uniqStrings(Object.values(serialsByProduct).flat());
 
-    /**
-     * ✅ Device-Items (relevante Geräte) über Warengruppe (= articleCategory) ermitteln.
-     * Wir fragen dafür pro Artikel die Kategorie ab und filtern NUR:
-     * - Barebone Mini-PC
-     * - Rugged Tablet
-     */
-    const deviceItems: Array<{
+    // ✅ Artikel + Kategorie sicher auflösen (article -> articleCategoryId -> articleCategoryName)
+    const articleCache = new Map<string, any>();
+    const categoryCache = new Map<string, { id: string; name: string }>();
+
+    async function getArticle(articleId: string) {
+      if (articleCache.has(articleId)) return articleCache.get(articleId);
+      const ar = await weclappGet(`${apiBase}/article/id/${encodeURIComponent(articleId)}`);
+      const art = ar.ok ? ar.json : null;
+      articleCache.set(articleId, art);
+      return art;
+    }
+
+    async function getCategoryName(categoryId: string): Promise<string> {
+      const cid = String(categoryId ?? "").trim();
+      if (!cid) return "";
+      if (categoryCache.has(cid)) return categoryCache.get(cid)!.name;
+
+      const cr = await weclappGet(`${apiBase}/articleCategory/id/${encodeURIComponent(cid)}`);
+      const name = cr.ok ? String(cr.json?.name ?? cr.json?.articleCategoryName ?? "").trim() : "";
+      categoryCache.set(cid, { id: cid, name });
+      return name;
+    }
+
+    const deviceItemsAll: Array<{
       articleId: string;
       title: string;
       categoryId: string;
       categoryName: string;
       serials: string[];
     }> = [];
-
-    // Artikelinfos cachen (damit nicht doppelt angefragt wird)
-    const articleCache = new Map<string, any>();
 
     for (const it of items || []) {
       const articleId = String(it?.articleId ?? "").trim();
@@ -169,18 +178,16 @@ export async function GET(req: Request) {
 
       const itemSerials = serialsByProduct[title] || [];
 
-      // Artikel laden (für category)
-      let art = articleCache.get(articleId);
-      if (!art) {
-        const ar = await weclappGet(`${apiBase}/article/id/${encodeURIComponent(articleId)}`);
-        art = ar.ok ? ar.json : null;
-        articleCache.set(articleId, art);
+      const art = await getArticle(articleId);
+
+      const categoryId = String(art?.articleCategoryId ?? it?.articleCategoryId ?? "").trim();
+      let categoryName = String(art?.articleCategoryName ?? it?.articleCategoryName ?? "").trim();
+
+      if (!categoryName && categoryId) {
+        categoryName = await getCategoryName(categoryId);
       }
 
-      const categoryId = String(art?.articleCategoryId ?? "").trim();
-      const categoryName = String(art?.articleCategoryName ?? "").trim();
-
-      deviceItems.push({
+      deviceItemsAll.push({
         articleId,
         title,
         categoryId,
@@ -189,46 +196,52 @@ export async function GET(req: Request) {
       });
     }
 
-    // ✅ Nur relevante Geräte-Warengruppen
-    const relevantDeviceItems = deviceItems.filter((x) => isAllowedGroupName(x.categoryName));
+    const deviceItems = deviceItemsAll.filter((x) => isAllowedGroupName(x.categoryName));
 
-    // ✅ deviceType ausschließlich aus Warengruppe bestimmen (keine Namens-Heuristik)
-    const detectedGroup = relevantDeviceItems[0]?.categoryName || "";
-    const deviceType: DeviceType =
-      deviceTypeFromGroupName(detectedGroup) || "mini";
+    const detectedGroup = deviceItems[0]?.categoryName || "";
+    const deviceType: DeviceType = deviceTypeFromGroupName(detectedGroup) || "mini";
 
-    // ✅ deviceSerials = nur Seriennummern der relevanten Geräte (Barebone Mini-PC oder Rugged Tablet)
-    const deviceSerials: string[] = uniqStrings(
-      relevantDeviceItems.flatMap((x) => x.serials as unknown[]),
-    );
+    const deviceSerials = uniqStrings(deviceItems.flatMap((x) => x.serials as unknown[]));
 
-    // ✅ Wenn aus irgendeinem Grund keine deviceSerials gefunden wurden, fallback auf "alle Serials"
-    const finalDeviceSerials = deviceSerials.length ? deviceSerials : serials;
+    // ✅ Ganz wichtig: wenn wir keine relevanten Geräte finden -> NICHT alles nehmen, sondern Fehler anzeigen
+    if (!deviceItems.length || !deviceSerials.length) {
+      return jsonError(
+        "Keine relevanten Geräte (Warengruppe Barebone Mini-PC / Rugged Tablet) im Beleg gefunden.",
+        422,
+        {
+          entity: t.entity,
+          input: documentNumber,
+          documentNumber: resolvedDocumentNumber,
+          customerName,
+          debug: {
+            hint: "Prüfe, ob die Artikel im Lieferschein eine Warengruppe (Artikelkategorie) haben und ob sie exakt 'Barebone Mini-PC' oder 'Rugged Tablet' heißt.",
+            deviceItemsAllPreview: deviceItemsAll.slice(0, 10),
+          },
+        },
+      );
+    }
 
     return NextResponse.json({
       ok: true,
-      entity,
+      entity: t.entity,
       input: documentNumber,
-
-      // ✅ eindeutig (Belegnummer = Basis!)
       documentNumber: resolvedDocumentNumber,
       salesOrderNumber,
-
       customerName,
 
-      // alle Positionen (für Debug/optional Anzeige)
+      // optional (kann UI verstecken)
       productNames,
       serials,
       serialsByProduct,
 
-      // relevante Geräte (Warengruppe)
-      deviceItems: relevantDeviceItems,
-      deviceSerials: finalDeviceSerials,
+      // ✅ das ist das Wichtige für SaaS
+      deviceItems,
+      deviceSerials,
       deviceType,
 
       raw: obj,
     });
   }
 
-  return jsonError("Weclapp Request fehlgeschlagen (siehe debug).", 502, { debug: { apiBase, tried } });
+  return jsonError("Kein Beleg mit exakt dieser Belegnummer gefunden.", 404, { debug: { apiBase, tried } });
 }
