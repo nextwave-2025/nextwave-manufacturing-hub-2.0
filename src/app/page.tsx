@@ -751,19 +751,8 @@ export default function Page() {
     }
   };
 
-    // nur für Anzeige im UI:
-    if (email === "mustafa@next-wave.tech") setOperator("Mustafa Ergin");
-    else if (email === "jonas@next-wave.tech") setOperator("Jonas Harlacher");
-    else setOperator(email);
-
-    setStep("delivery");
-  } catch {
-    setLoginError("Login fehlgeschlagen (Server nicht erreichbar).");
-  }
-};
-
   const setFieldValue = (key: string, value: any) => {
-    setRows((prev) => prev.map((x, i) => (i === activeIdx ? { ...x, [key]: value } : x)));
+  setRows((prev) => prev.map((x, i) => (i === activeIdx ? { ...x, [key]: value } : x)));
   };
 
   const downloadPdf = () => {
