@@ -449,6 +449,113 @@ export default function Page() {
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
+    // ✅ Restore UI + Session after reload (keine Abmeldung durch Reload)
+  useEffect(() => {
+    // 1) State restore (Arbeitsstand)
+    try {
+      const raw = localStorage.getItem(LS_USER_STATE);
+      if (raw) {
+        const s = JSON.parse(raw);
+
+        if (typeof s.step === "string") setStep(s.step);
+        if (typeof s.deviceType === "string") setDeviceType(s.deviceType);
+
+        if (typeof s.dnInput === "string") setDnInput(s.dnInput);
+        if (typeof s.dnLoaded === "boolean") setDnLoaded(s.dnLoaded);
+        if (typeof s.customerName === "string") setCustomerName(s.customerName);
+        if (Array.isArray(s.productNames)) setProductNames(s.productNames);
+
+        if (Array.isArray(s.expectedSerials)) setExpectedSerials(s.expectedSerials);
+        if (Array.isArray(s.rows)) setRows(s.rows);
+        if (typeof s.activeIdx === "number") setActiveIdx(s.activeIdx);
+
+        if (typeof s.search === "string") setSearch(s.search);
+        if (typeof s.autoAdvance === "boolean") setAutoAdvance(s.autoAdvance);
+
+        if (typeof s.dark === "boolean") setDark(s.dark);
+
+        if (typeof s.signatureInitials === "string") setSignatureInitials(s.signatureInitials);
+        if (typeof s.signatureDataUrl === "string") setSignatureDataUrl(s.signatureDataUrl);
+        if (typeof s.showPdfPreview === "boolean") setShowPdfPreview(s.showPdfPreview);
+      }
+    } catch {
+      // ignore
+    }
+
+    // 2) Session restore (Cookie prüfen)
+    (async () => {
+      try {
+        const r = await fetch("/api/auth/session", { method: "GET", cache: "no-store" });
+        const j = await r.json();
+
+        if (j?.ok) {
+          setIsAuthed(true);
+
+          // Operator-Name aus localStorage wiederherstellen (wir speichern den beim Login)
+          const op = localStorage.getItem(LS_USER_OPERATOR) || "";
+          if (op) setOperator(op);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+    // ✅ Persist Arbeitsstand automatisch (nur Reset darf löschen)
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      try {
+        const snapshot = {
+          step,
+          deviceType,
+
+          dnInput,
+          dnLoaded,
+          customerName,
+          productNames,
+
+          expectedSerials,
+          rows,
+          activeIdx,
+
+          search,
+          autoAdvance,
+
+          dark,
+
+          signatureInitials,
+          signatureDataUrl,
+          showPdfPreview,
+        };
+        localStorage.setItem(LS_USER_STATE, JSON.stringify(snapshot));
+      } catch {
+        // ignore
+      }
+    }, 250);
+
+    return () => window.clearTimeout(t);
+  }, [
+    step,
+    deviceType,
+    dnInput,
+    dnLoaded,
+    customerName,
+    productNames,
+    expectedSerials,
+    rows,
+    activeIdx,
+    search,
+    autoAdvance,
+    dark,
+    signatureInitials,
+    signatureDataUrl,
+    showPdfPreview,
+  ]);
+
+  const LS_USER_STATE = "nextwave_user_state_v1";
+  const LS_USER_OPERATOR = "nextwave_user_operator_v1";
+  
   const [step, setStep] = useState<Step>("delivery");
   const [deviceType, setDeviceType] = useState<DeviceType>("mini");
 
@@ -581,46 +688,68 @@ export default function Page() {
     if (step === "checks") focusScan();
   }, [step]);
 
-  const resetAll = () => {
-    setStep("delivery");
+ const resetAll = () => {
 
-    setDnLoaded(false);
-    setCustomerName("");
-    setExpectedSerials([]);
-    setRows([]);
-    setActiveIdx(-1);
-    setSearch("");
-    setScanError(null);
-    setAutoAdvance(false);
+  // ✅ gespeicherten Arbeitsstand wirklich löschen
+  try {
+    localStorage.removeItem("nextwave_user_state_v1");
+    localStorage.removeItem("nextwave_user_operator_v1");
+  } catch {
+    // ignore
+  }
 
-    setProductNames([]);
-    setSignatureInitials("");
-    setSignatureDataUrl("");
-    setShowPdfPreview(false);
+  setStep("delivery");
 
-    setDeviceType("mini");
-  };
+  setDnLoaded(false);
+  setCustomerName("");
+  setExpectedSerials([]);
+  setRows([]);
+  setActiveIdx(-1);
+  setSearch("");
+  setScanError(null);
+  setAutoAdvance(false);
+
+  setProductNames([]);
+  setSignatureInitials("");
+  setSignatureDataUrl("");
+  setShowPdfPreview(false);
+
+  setDeviceType("mini");
+};
 
   const doLogin = async () => {
-  const email = loginEmail.trim().toLowerCase();
-  const pw = loginPassword;
+    const email = loginEmail.trim().toLowerCase();
+    const pw = loginPassword;
 
-  try {
-    const res = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password: pw }),
-    });
-
-    const data = await res.json();
-
-    if (!res.ok || !data?.success) {
+    const u = USERS.find((x) => x.email.toLowerCase() === email && x.password === pw);
+    if (!u) {
       setLoginError("Login fehlgeschlagen. Bitte E-Mail/Passwort prüfen.");
       return;
     }
 
-    setLoginError(null);
-    setIsAuthed(true);
+    try {
+      // ✅ Serverseitig Cookie setzen
+      const r = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: u.email, password: pw }),
+      });
+
+      const j = await r.json();
+      if (!j?.success) {
+        setLoginError(j?.error || "Login fehlgeschlagen.");
+        return;
+      }
+
+      setLoginError(null);
+      setIsAuthed(true);
+      setOperator(u.name);
+      localStorage.setItem(LS_USER_OPERATOR, u.name);
+      setStep("delivery");
+    } catch {
+      setLoginError("Login fehlgeschlagen (Netzwerk).");
+    }
+  };
 
     // nur für Anzeige im UI:
     if (email === "mustafa@next-wave.tech") setOperator("Mustafa Ergin");
@@ -985,12 +1114,28 @@ export default function Page() {
 
                   <div className="flex items-center gap-3 pt-2 flex-wrap justify-end">
                     <button
-                      type="button"
-                      onClick={resetAll}
-                      className="h-10 px-4 rounded-2xl border border-white/15 bg-white/10 text-white hover:bg-white/15 backdrop-blur text-sm font-semibold"
-                    >
-                      Reset
-                    </button>
+  type="button"
+  onClick={async () => {
+    const ok = window.confirm(
+      "Bist du sicher, dass du dich abmelden willst?\n\nNicht übertragene Daten könnten verloren gehen, wenn du danach Reset machst oder den Browser-Cache löschst."
+    );
+    if (!ok) return;
+
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // ignore
+    }
+
+    // ✅ Nur Auth zurücksetzen, NICHT den Arbeitsstand löschen
+    setIsAuthed(false);
+    setLoginPassword("");
+    setLoginError(null);
+  }}
+  className="h-10 px-4 rounded-2xl border border-white/15 bg-white/10 text-white hover:bg-white/15 backdrop-blur text-sm font-semibold"
+>
+  Abmelden
+</button>
 
                     <button
                       type="button"
