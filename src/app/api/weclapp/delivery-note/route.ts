@@ -1,7 +1,4 @@
-// src/app/api/weclapp/delivery-note/route.ts
 import { NextResponse } from "next/server";
-
-type Yn = "unset" | "yes" | "no";
 
 type WeclappDeviceItem = {
   articleId: string;
@@ -45,6 +42,15 @@ function jsonErr(error: string, status = 400, debug?: any) {
   return NextResponse.json(body, { status });
 }
 
+function normalizeApiBase(raw: string) {
+  const base = String(raw || "").trim().replace(/\/+$/, "");
+  if (!base) return "";
+  // ✅ Wenn schon /webapp/api/v1 drin ist: ok
+  if (base.includes("/webapp/api/v1")) return base;
+  // ✅ Sonst anhängen
+  return `${base}/webapp/api/v1`;
+}
+
 function pickCustomerName(shipment: any): string {
   const r = shipment?.recipientAddress?.company;
   const i = shipment?.invoiceAddress?.company;
@@ -65,8 +71,7 @@ function normalizeSerial(sn: string) {
 
 const ALLOWED_DEVICE_CATEGORIES = new Set(["BAREBONE MINI-PC", "RUGGED TABLET"]);
 
-async function weclappGet(url: string) {
-  const token = process.env.WECLAPP_API_TOKEN || "";
+async function weclappGet(url: string, token: string) {
   const res = await fetch(url, {
     method: "GET",
     headers: {
@@ -93,12 +98,14 @@ async function weclappGet(url: string) {
 }
 
 export async function GET(req: Request) {
-  const apiBase = (process.env.WECLAPP_BASE_URL || "").trim();
+  const rawBase = process.env.WECLAPP_BASE_URL || "";
+  const apiBase = normalizeApiBase(rawBase);
   const token = (process.env.WECLAPP_API_TOKEN || "").trim();
 
   if (!apiBase || !token) {
     return jsonErr("Server-Konfiguration fehlt: WECLAPP_BASE_URL oder WECLAPP_API_TOKEN ist leer.", 500, {
-      hasBase: Boolean(apiBase),
+      rawBase,
+      normalizedBase: apiBase,
       hasToken: Boolean(token),
     });
   }
@@ -111,40 +118,45 @@ export async function GET(req: Request) {
   }
 
   const input = inputRaw;
-
   const tried: any[] = [];
 
-  // --- 1) Shipment per EXAKTER shipmentNumber ---
-  const shipmentUrl = `${apiBase.replace(/\/+$/, "")}/shipment?shipmentNumber=${encodeURIComponent(input)}`;
-  const shipRes = await weclappGet(shipmentUrl);
+  // ✅ NUR shipment anhand shipmentNumber
+  const shipmentUrl = `${apiBase}/shipment?shipmentNumber=${encodeURIComponent(input)}`;
+  const shipRes = await weclappGet(shipmentUrl, token);
+
   tried.push({
     url: shipmentUrl,
     status: shipRes.status,
-    bodyPreview: shipRes.text?.slice(0, 250),
+    bodyPreview: shipRes.text?.slice(0, 600),
   });
 
   if (!shipRes.ok) {
     return jsonErr(`Weclapp-Request fehlgeschlagen (shipment). HTTP ${shipRes.status}`, 502, {
-      apiBase,
       tried,
+      normalizedBase: apiBase,
     });
   }
 
   const resultArr = Array.isArray(shipRes.json?.result) ? shipRes.json.result : [];
+
+  // ✅ Wenn leer: Debug mitliefern (hier sieht man sofort ob falsche Base oder falsche Nummer)
   if (!resultArr.length) {
     return jsonErr("Kein Beleg mit exakt dieser Belegnummer gefunden.", 404, {
-      apiBase,
       tried,
+      normalizedBase: apiBase,
+      hint:
+        "Wenn du diesen Fehler bei ALLEN Nummern bekommst, ist fast immer WECLAPP_BASE_URL falsch (ohne /webapp/api/v1) oder zeigt auf die falsche Weclapp-Instanz.",
     });
   }
 
-  // Weclapp kann theoretisch mehrere liefern → wir nehmen nur dann, wenn exakt match
+  // Weclapp sollte hier exakt matchen, aber wir prüfen trotzdem:
   const exact = resultArr.find((x: any) => String(x?.shipmentNumber || "").trim() === input);
+
   if (!exact) {
     return jsonErr("Kein Beleg mit exakt dieser Belegnummer gefunden.", 404, {
-      apiBase,
       tried,
-      found: resultArr.map((x: any) => x?.shipmentNumber),
+      normalizedBase: apiBase,
+      foundShipmentNumbers: resultArr.map((x: any) => x?.shipmentNumber),
     });
   }
 
@@ -154,7 +166,7 @@ export async function GET(req: Request) {
   const salesOrderNumber = String(shipment?.salesOrderNumber || shipment?.packageReferenceNumber || "").trim();
   const customerName = pickCustomerName(shipment);
 
-  // --- 2) Artikel + Kategorien auflösen (Cache) ---
+  // --- Artikel/Kategorien auflösen (Cache) ---
   const articleCache = new Map<string, any>();
   const categoryCache = new Map<string, { id: string; name: string }>();
 
@@ -163,13 +175,9 @@ export async function GET(req: Request) {
     if (!id) return null;
     if (articleCache.has(id)) return articleCache.get(id);
 
-    const url = `${apiBase.replace(/\/+$/, "")}/article/id/${encodeURIComponent(id)}`;
-    const ar = await weclappGet(url);
-    tried.push({
-      url,
-      status: ar.status,
-      bodyPreview: ar.text?.slice(0, 160),
-    });
+    const url = `${apiBase}/article/id/${encodeURIComponent(id)}`;
+    const ar = await weclappGet(url, token);
+    tried.push({ url, status: ar.status, bodyPreview: ar.text?.slice(0, 250) });
 
     const art = ar.ok ? ar.json : null;
     articleCache.set(id, art);
@@ -181,20 +189,15 @@ export async function GET(req: Request) {
     if (!cid) return "";
     if (categoryCache.has(cid)) return categoryCache.get(cid)!.name;
 
-    const url = `${apiBase.replace(/\/+$/, "")}/articleCategory/id/${encodeURIComponent(cid)}`;
-    const cr = await weclappGet(url);
-    tried.push({
-      url,
-      status: cr.status,
-      bodyPreview: cr.text?.slice(0, 160),
-    });
+    const url = `${apiBase}/articleCategory/id/${encodeURIComponent(cid)}`;
+    const cr = await weclappGet(url, token);
+    tried.push({ url, status: cr.status, bodyPreview: cr.text?.slice(0, 250) });
 
     const name = cr.ok ? String(cr.json?.name || "").trim() : "";
     categoryCache.set(cid, { id: cid, name });
     return name;
   };
 
-  // --- 3) shipmentItems -> serials + deviceItems (nur erlaubte Kategorien) ---
   const shipmentItems = Array.isArray(shipment?.shipmentItems) ? shipment.shipmentItems : [];
 
   const deviceItems: WeclappDeviceItem[] = [];
@@ -205,7 +208,6 @@ export async function GET(req: Request) {
     const articleId = String(it?.articleId || "").trim();
     const title = String(it?.title || "").trim();
 
-    // serialNumbers liegen in picks[]
     const picks = Array.isArray(it?.picks) ? it.picks : [];
     const serialsRaw: string[] = [];
     for (const p of picks) {
@@ -215,16 +217,14 @@ export async function GET(req: Request) {
     const serials = uniq(serialsRaw.map(normalizeSerial));
 
     if (!articleId || !title) continue;
-    if (!serials.length) continue; // keine Seriennummern => für Fertigung uninteressant
+    if (!serials.length) continue;
 
-    // Kategorie über Artikel holen
     const art = await getArticle(articleId);
     const categoryId = String(art?.articleCategoryId || art?.categoryId || "").trim();
     const categoryName = categoryId ? await getCategoryName(categoryId) : "";
 
     const catUpper = toUpperTrim(categoryName);
 
-    // Nur relevante Geräte-Kategorien übernehmen
     if (ALLOWED_DEVICE_CATEGORIES.has(catUpper)) {
       deviceItems.push({
         articleId,
@@ -239,22 +239,19 @@ export async function GET(req: Request) {
     }
   }
 
-  // Misch-Lieferschein verhindern (du sagst: kommt nie vor)
   if (hasMini && hasRugged) {
     return jsonErr("Dieser Lieferschein enthält gemischte Warengruppen (Mini-PC + Rugged Tablet). Das ist nicht erlaubt.", 409, {
       documentNumber,
       categories: deviceItems.map((d) => d.categoryName),
+      tried,
     });
   }
 
   const deviceType: "mini" | "rugged" = hasRugged ? "rugged" : "mini";
-
   const deviceSerials = uniq(deviceItems.flatMap((d) => d.serials));
-
-  // Kosmetik: Produktnamen NUR die relevanten Geräte, nicht RAM/SSD/CPU
   const productNames = deviceItems.map((d) => d.title);
 
-  const payload: ApiResponseOk = {
+  return jsonOk({
     ok: true,
     entity: "shipment",
     input,
@@ -270,7 +267,5 @@ export async function GET(req: Request) {
 
     deviceType,
     raw: shipment,
-  };
-
-  return jsonOk(payload);
+  });
 }
