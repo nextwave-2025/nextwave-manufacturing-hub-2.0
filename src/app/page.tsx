@@ -1498,7 +1498,7 @@ export default function Page() {
         {/* DELIVERY */}
         {step === "delivery" && (
           <Card>
-            <CardHeader title="Lieferschein holen" desc="Eingabe z. B. Lieferschein-Nummer → Live aus Weclapp." />
+            <CardHeader title="Lieferschein abrufen (Weclapp)" desc="Eingabe z. B. Lieferschein-Nummer → Live aus Weclapp." />
             <CardBody>
               <div className="space-y-4">
                 <div className="flex flex-col sm:flex-row gap-3 max-w-2xl">
