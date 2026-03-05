@@ -42,12 +42,31 @@ function jsonErr(error: string, status = 400, debug?: any) {
   return NextResponse.json(body, { status });
 }
 
+/**
+ * ✅ Robust: WECLAPP_BASE_URL kann sein:
+ * - https://xxx.weclapp.com
+ * - https://xxx.weclapp.com/webapp/api/v1
+ * - https://xxx.weclapp.com/webapp/api/v2
+ *
+ * -> Wir normalisieren IMMER auf: https://xxx.weclapp.com/webapp/api/v1
+ */
 function normalizeApiBase(raw: string) {
-  const base = String(raw || "").trim().replace(/\/+$/, "");
+  let base = String(raw || "").trim();
   if (!base) return "";
-  // ✅ Wenn schon /webapp/api/v1 drin ist: ok
-  if (base.includes("/webapp/api/v1")) return base;
-  // ✅ Sonst anhängen
+
+  // remove trailing slashes
+  base = base.replace(/\/+$/, "");
+
+  // if contains /webapp/api/v{n} -> cut exactly to that segment
+  // Example: https://.../webapp/api/v2  -> we want https://.../webapp/api/v1
+  // Example: https://.../webapp/api/v2/webapp/api/v1 -> we want clean v1
+  const m = base.match(/^(.*?)(\/webapp\/api\/v\d+)(\/.*)?$/i);
+  if (m) {
+    const root = m[1]; // https://xxx.weclapp.com
+    return `${root}/webapp/api/v1`;
+  }
+
+  // if not containing webapp/api -> append v1
   return `${base}/webapp/api/v1`;
 }
 
@@ -127,35 +146,34 @@ export async function GET(req: Request) {
   tried.push({
     url: shipmentUrl,
     status: shipRes.status,
-    bodyPreview: shipRes.text?.slice(0, 600),
+    bodyPreview: shipRes.text?.slice(0, 600) || "",
   });
 
   if (!shipRes.ok) {
     return jsonErr(`Weclapp-Request fehlgeschlagen (shipment). HTTP ${shipRes.status}`, 502, {
       tried,
       normalizedBase: apiBase,
+      rawBase,
     });
   }
 
   const resultArr = Array.isArray(shipRes.json?.result) ? shipRes.json.result : [];
 
-  // ✅ Wenn leer: Debug mitliefern (hier sieht man sofort ob falsche Base oder falsche Nummer)
   if (!resultArr.length) {
     return jsonErr("Kein Beleg mit exakt dieser Belegnummer gefunden.", 404, {
       tried,
       normalizedBase: apiBase,
-      hint:
-        "Wenn du diesen Fehler bei ALLEN Nummern bekommst, ist fast immer WECLAPP_BASE_URL falsch (ohne /webapp/api/v1) oder zeigt auf die falsche Weclapp-Instanz.",
+      rawBase,
+      hint: "Wenn result leer ist obwohl du die Nummer sicher hast: Prüfe ob du in der richtigen Weclapp-Instanz bist.",
     });
   }
 
-  // Weclapp sollte hier exakt matchen, aber wir prüfen trotzdem:
   const exact = resultArr.find((x: any) => String(x?.shipmentNumber || "").trim() === input);
-
   if (!exact) {
     return jsonErr("Kein Beleg mit exakt dieser Belegnummer gefunden.", 404, {
       tried,
       normalizedBase: apiBase,
+      rawBase,
       foundShipmentNumbers: resultArr.map((x: any) => x?.shipmentNumber),
     });
   }
@@ -177,7 +195,7 @@ export async function GET(req: Request) {
 
     const url = `${apiBase}/article/id/${encodeURIComponent(id)}`;
     const ar = await weclappGet(url, token);
-    tried.push({ url, status: ar.status, bodyPreview: ar.text?.slice(0, 250) });
+    tried.push({ url, status: ar.status, bodyPreview: ar.text?.slice(0, 250) || "" });
 
     const art = ar.ok ? ar.json : null;
     articleCache.set(id, art);
@@ -191,7 +209,7 @@ export async function GET(req: Request) {
 
     const url = `${apiBase}/articleCategory/id/${encodeURIComponent(cid)}`;
     const cr = await weclappGet(url, token);
-    tried.push({ url, status: cr.status, bodyPreview: cr.text?.slice(0, 250) });
+    tried.push({ url, status: cr.status, bodyPreview: cr.text?.slice(0, 250) || "" });
 
     const name = cr.ok ? String(cr.json?.name || "").trim() : "";
     categoryCache.set(cid, { id: cid, name });
@@ -222,7 +240,6 @@ export async function GET(req: Request) {
     const art = await getArticle(articleId);
     const categoryId = String(art?.articleCategoryId || art?.categoryId || "").trim();
     const categoryName = categoryId ? await getCategoryName(categoryId) : "";
-
     const catUpper = toUpperTrim(categoryName);
 
     if (ALLOWED_DEVICE_CATEGORIES.has(catUpper)) {
@@ -244,6 +261,8 @@ export async function GET(req: Request) {
       documentNumber,
       categories: deviceItems.map((d) => d.categoryName),
       tried,
+      normalizedBase: apiBase,
+      rawBase,
     });
   }
 
