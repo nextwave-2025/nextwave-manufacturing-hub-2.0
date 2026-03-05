@@ -1141,10 +1141,15 @@ export default function Page() {
 
       const j = await r.json().catch(() => null);
 
-      if (!r.ok || !j?.success) {
-        setUploadError(j?.error || `Upload fehlgeschlagen (HTTP ${r.status}).`);
-        return;
-      }
+if (!r.ok || !j?.success) {
+  const msg =
+    j?.message ||
+    j?.error ||
+    `Upload fehlgeschlagen (HTTP ${r.status}).`;
+
+  setUploadError(msg);
+  return;
+}
 
       setUploadOkMsg("✅ Upload erfolgreich – Dokument wurde am Shipment gespeichert.");
     } catch (e: any) {
