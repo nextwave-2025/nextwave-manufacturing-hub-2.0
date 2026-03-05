@@ -2,6 +2,29 @@ import { NextResponse } from "next/server";
 import { weclappFetch } from "../../../../../../lib/weclapp";
 import { requireAuth } from "../../../../../../lib/auth";
 
+type WeclappDocument = {
+  id: string;
+  name?: string;
+  description?: string;
+  createdDate?: number;
+};
+
+async function listShipmentDocuments(shipmentId: string): Promise<WeclappDocument[]> {
+  // Weclapp: list documents by entityName/entityId
+  const qs = new URLSearchParams({
+    entityName: "shipment",
+    entityId: shipmentId,
+  });
+
+  const res = await weclappFetch(`/document?${qs.toString()}`, { method: "GET" });
+
+  // Some Weclapp endpoints return { result: [...] }
+  const json = await res.json().catch(() => null);
+
+  const docs: WeclappDocument[] = Array.isArray(json?.result) ? json.result : Array.isArray(json) ? json : [];
+  return docs;
+}
+
 export async function GET() {
   const auth = requireAuth();
   if (!auth.ok) {
@@ -29,6 +52,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ success: false, error: "Missing file (form field 'file')" }, { status: 400 });
   }
 
+  // Filename logic (unchanged)
   const providedName = form.get("name");
   const filename =
     (typeof providedName === "string" && providedName.trim() ? providedName.trim() : "") ||
@@ -37,6 +61,28 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const descVal = form.get("description");
   const description = typeof descVal === "string" && descVal.trim() ? descVal.trim() : "NEXTWAVE Fertigungsprotokoll";
+
+  // ✅ NEW: Prevent duplicates by name
+  // We do a server-side check before upload.
+  try {
+    const existingDocs = await listShipmentDocuments(shipmentId);
+    const hit = existingDocs.find((d) => (d.name || "").trim() === filename);
+
+    if (hit) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "ALREADY_EXISTS",
+          message: `Upload nicht möglich: Dokument existiert bereits (${filename}).`,
+          existing: { id: hit.id, name: hit.name },
+        },
+        { status: 409 }
+      );
+    }
+  } catch {
+    // If listing fails, we do NOT break your workflow silently with a false positive.
+    // We allow upload to proceed, because your current process must keep working.
+  }
 
   const pdfBytes = Buffer.from(await (file as Blob).arrayBuffer());
 
