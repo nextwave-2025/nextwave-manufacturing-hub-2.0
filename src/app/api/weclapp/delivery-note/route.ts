@@ -64,7 +64,7 @@ async function safeReadJson(res: Response) {
 export async function GET(req: Request) {
   const started = Date.now();
 
-  const apiBase = process.env.WECLAPP_API_BASE || process.env.WECLAPP_API_URL || "";
+  const apiBase = process.env.WECLAPP_BASE_URL || "";
   const token = process.env.WECLAPP_API_TOKEN || "";
 
   const { searchParams } = new URL(req.url);
