@@ -6,42 +6,30 @@ import { Check, AlertTriangle, Search, ArrowLeft, ArrowRight, Eye, EyeOff, Downl
 import jsPDF from "jspdf";
 
 // ✅ Relativer Import, damit kein @/ Alias nötig ist
-// Wenn deine Datei anders heißt: ../lib/layoutConfig
 import { loadLayouts } from "../lib/layoutConfig";
 
 /** =========================
  * Types (tolerant & robust)
  * ========================= */
 
-// Yn value used in UI
 type Yn = "unset" | "yes" | "no";
-
-// device type
 type DeviceType = "mini" | "rugged";
 
-// showWhen structure (optional)
 type ShowWhen =
   | { key: string; eqYn: Yn }
   | { key: string; eqBool: boolean };
 
-// field types supported
 type FieldType = "yn" | "boolean" | "text";
 
-// field definition (tolerant: admin may add properties)
 type FieldDef = {
   key: string;
   label: string;
   type: FieldType;
   required?: boolean;
-
-  // optional: conditional visibility
   showWhen?: ShowWhen;
-
-  // optional helpers (if you later extend)
   requiresCommentWhenNo?: boolean;
 };
 
-// sections config
 type SectionDef = {
   title: string;
   fields: FieldDef[];
@@ -57,24 +45,19 @@ type Layouts = Record<DeviceType, LayoutConfig>;
 
 type Step = "delivery" | "checks" | "summary";
 
-// ✅ Row: fixed core fields + dynamic custom fields
 type Row = {
   sn: string;
   confirmed: boolean;
 
-  // shared
   visual: Yn;
   visualComment: string;
   shake: Yn;
 
-  // Mini relevant
   osInstalled: Yn;
   ssdDetected: Yn;
 
-  // Rugged relevant
   iotInstalled: Yn;
 
-  // allow custom fields (added via admin)
   [key: string]: any;
 };
 
@@ -102,6 +85,7 @@ type WeclappDeliveryNoteResponse = {
 
   deviceItems?: WeclappDeviceItem[];
   deviceSerials?: string[];
+  deviceType?: DeviceType;
 };
 
 const ORANGE = "#f15124";
@@ -119,16 +103,13 @@ function emptyRow(sn: string): Row {
     sn,
     confirmed: false,
 
-    // shared
     visual: "unset",
     visualComment: "",
     shake: "unset",
 
-    // mini core
     osInstalled: "unset",
     ssdDetected: "unset",
 
-    // rugged core
     iotInstalled: "unset",
   };
 }
@@ -142,13 +123,20 @@ function boolLabel(v: boolean) {
   return v ? "Ja" : "Nein";
 }
 
+function isRelevantCategoryName(name?: string) {
+  const n = (name || "").trim();
+  return n === "Barebone Mini-PC" || n === "Rugged Tablet";
+}
+
+function inferDeviceTypeFromDeviceItems(items: WeclappDeviceItem[]): DeviceType {
+  const hasRugged = items.some((x) => (x.categoryName || "").trim() === "Rugged Tablet");
+  return hasRugged ? "rugged" : "mini";
+}
+
 /**
- * ✅ Central visibility logic:
- * 1) if field has showWhen -> apply it
- * 2) else apply known production rules (compat to your workflow)
+ * Visibility logic
  */
 function shouldShowField(row: Row, f: FieldDef): boolean {
-  // (1) showWhen from admin
   if (f.showWhen && typeof f.showWhen === "object" && "key" in f.showWhen) {
     const cond = f.showWhen as any;
     const val: any = (row as any)[cond.key];
@@ -156,16 +144,12 @@ function shouldShowField(row: Row, f: FieldDef): boolean {
     if ("eqBool" in cond) return Boolean(val) === cond.eqBool;
   }
 
-  // (2) fallback production rules (classic)
-  // - ssdDetected only when osInstalled=no
   if (f.key === "ssdDetected") return row.osInstalled === "no";
 
-  // - OS checks only when osInstalled=yes
   if (["driversOk", "updatesDone", "powerPlanSet", "windowsActivated"].includes(f.key)) {
     return row.osInstalled === "yes";
   }
 
-  // - Rugged IoT sub-checks only when iotInstalled=yes
   if (["cameraAppInstalled", "controlCenterInstalled"].includes(f.key)) {
     return row.iotInstalled === "yes";
   }
@@ -174,27 +158,24 @@ function shouldShowField(row: Row, f: FieldDef): boolean {
 }
 
 function isFieldComplete(row: Row, f: FieldDef): boolean {
-  if (!shouldShowField(row, f)) return true; // hidden fields don't block
+  if (!shouldShowField(row, f)) return true;
 
   const v: any = (row as any)[f.key];
 
   if (f.type === "yn") {
     if (v === "unset") return false;
 
-    // special: visual comment required when "no"
     if (f.key === "visual" && v === "no") {
       return (row.visualComment || "").trim().length > 0;
     }
-
     return true;
   }
 
   if (f.type === "boolean") {
-    if (!f.required) return true; // optional boolean can stay false
+    if (!f.required) return true;
     return v === true;
   }
 
-  // text
   if (!f.required) return true;
   return String(v ?? "").trim().length > 0;
 }
@@ -303,7 +284,7 @@ function CheckToggle({ label, checked, onChange }: { label: string; checked: boo
 }
 
 /**
- * ✅ SignaturePad (stable)
+ * SignaturePad
  */
 function SignaturePad({
   value,
@@ -459,14 +440,11 @@ export default function Page() {
     { key: "summary", label: "Zusammenfassung" },
   ];
 
-  // ✅ localStorage keys (MÜSSEN vor useEffect stehen)
   const LS_USER_STATE = "nextwave_user_state_v1";
   const LS_USER_OPERATOR = "nextwave_user_operator_v1";
 
-  // ✅ layouts from lib (admin saves into LocalStorage, loadLayouts reads it)
   const [layouts, setLayouts] = useState<Layouts>(() => loadLayouts() as any);
 
-  // ✅ State: MUSS vor useEffects stehen, die es benutzen
   const [step, setStep] = useState<Step>("delivery");
   const [deviceType, setDeviceType] = useState<DeviceType>("mini");
 
@@ -483,15 +461,15 @@ export default function Page() {
   const [showPassword, setShowPassword] = useState(false);
 
   // delivery / workflow state
-  const [dnInput, setDnInput] = useState(""); // ✅ real
+  const [dnInput, setDnInput] = useState(""); // ✅ EXAKTE Belegnummer (z. B. 31147)
   const [dnLoaded, setDnLoaded] = useState(false);
 
   const [documentNumber, setDocumentNumber] = useState<string>("");
   const [salesOrderNumber, setSalesOrderNumber] = useState<string>("");
 
   const [customerName, setCustomerName] = useState<string>("");
-  const [productNames, setProductNames] = useState<string[]>([]);
-  const [deviceItems, setDeviceItems] = useState<WeclappDeviceItem[]>([]);
+  const [productNames, setProductNames] = useState<string[]>([]); // komplette Positionstitel (optional)
+  const [deviceItems, setDeviceItems] = useState<WeclappDeviceItem[]>([]); // NUR relevante Warengruppen
 
   const [dnLoading, setDnLoading] = useState(false);
   const [dnError, setDnError] = useState<string | null>(null);
@@ -518,9 +496,8 @@ export default function Page() {
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
-  // ✅ Restore UI + Session after reload (keine Abmeldung durch Reload)
+  // Restore UI + Session after reload
   useEffect(() => {
-    // 1) State restore (Arbeitsstand)
     try {
       const raw = localStorage.getItem(LS_USER_STATE);
       if (raw) {
@@ -556,7 +533,6 @@ export default function Page() {
       // ignore
     }
 
-    // 2) Session restore (Cookie prüfen)
     (async () => {
       try {
         const r = await fetch("/api/auth/session", { method: "GET", cache: "no-store" });
@@ -564,8 +540,6 @@ export default function Page() {
 
         if (j?.ok) {
           setIsAuthed(true);
-
-          // Operator-Name aus localStorage wiederherstellen (wir speichern den beim Login)
           const op = localStorage.getItem(LS_USER_OPERATOR) || "";
           if (op) setOperator(op);
         }
@@ -576,7 +550,7 @@ export default function Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ Persist Arbeitsstand automatisch (nur Reset darf löschen)
+  // Persist Arbeitsstand
   useEffect(() => {
     const t = window.setTimeout(() => {
       try {
@@ -650,7 +624,6 @@ export default function Page() {
   const activeRow = activeIdx >= 0 ? rows[activeIdx] : undefined;
   const totalExpected = expectedSerials.length;
 
-  // ✅ dynamic fields from selected device layout
   const deviceSections: SectionDef[] = useMemo(() => {
     const cfg = (layouts as any)?.[deviceType] as LayoutConfig | undefined;
     return cfg?.sections?.length ? (cfg.sections as any) : [];
@@ -671,6 +644,10 @@ export default function Page() {
     if (!q) return rows;
     return rows.filter((r) => r.sn.includes(q));
   }, [rows, search]);
+
+  const relevantDeviceItems = useMemo(() => {
+    return (deviceItems || []).filter((x) => isRelevantCategoryName(x.categoryName));
+  }, [deviceItems]);
 
   const focusScan = () => {
     window.setTimeout(() => {
@@ -695,7 +672,7 @@ export default function Page() {
     setScanError(null);
 
     if (!expectedSerials.includes(sn)) {
-      setScanError(`Achtung! Diese S/N wurde im Lieferschein/Shipment ${dnInput} nicht erfasst: ${sn}`);
+      setScanError(`Achtung! Diese S/N wurde im Lieferschein ${dnInput} nicht erfasst: ${sn}`);
       return;
     }
 
@@ -731,7 +708,6 @@ export default function Page() {
   }, [step]);
 
   const resetAll = () => {
-    // ✅ gespeicherten Arbeitsstand wirklich löschen
     try {
       localStorage.removeItem("nextwave_user_state_v1");
       localStorage.removeItem("nextwave_user_operator_v1");
@@ -777,12 +753,10 @@ export default function Page() {
     }
 
     try {
-      // ✅ Serverseitig Cookie setzen
       const r = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: u.email, password: pw },
-        ),
+        body: JSON.stringify({ email: u.email, password: pw }),
       });
 
       const j = await r.json();
@@ -805,7 +779,12 @@ export default function Page() {
     setRows((prev) => prev.map((x, i) => (i === activeIdx ? { ...x, [key]: value } : x)));
   };
 
-  // ✅ REAL: Lieferschein/Shipment aus Weclapp holen
+  /**
+   * ✅ REAL: Lieferschein/Shipment aus Weclapp holen
+   * - Input ist EXAKT die Belegnummer (shipmentNumber), z. B. 31147
+   * - deviceItems/deviceSerials kommen NUR aus Warengruppen:
+   *   Barebone Mini-PC / Rugged Tablet
+   */
   const loadDeliveryFromWeclapp = async () => {
     const input = (dnInput || "").trim();
     if (!input) return;
@@ -827,14 +806,14 @@ export default function Page() {
         return;
       }
 
+      // Wichtig: UI NICHT "irgendeinen" anderen Beleg anzeigen
+      // -> wir übernehmen genau was zurückkommt
       const cust = (j.customerName || "").trim();
       const prods = Array.isArray(j.productNames) ? j.productNames : [];
       const items = Array.isArray(j.deviceItems) ? j.deviceItems : [];
       const sns = Array.isArray(j.deviceSerials) ? j.deviceSerials : [];
 
-      // Gerätetyp aus Warengruppe ableiten (stabil, unabhängig vom Produktnamen)
-      const hasRugged = items.some((x) => (x.categoryName || "").trim() === "Rugged Tablet");
-      const inferred: DeviceType = hasRugged ? "rugged" : "mini";
+      const inferred: DeviceType = inferDeviceTypeFromDeviceItems(items);
       setDeviceType(inferred);
 
       const normalized = sns.map(normalizeSn).filter(Boolean);
@@ -857,9 +836,8 @@ export default function Page() {
       setSignatureInitials("");
       setSignatureDataUrl("");
 
-      // refresh layouts in case admin changed them
       setLayouts(loadLayouts() as any);
-    } catch (e: any) {
+    } catch {
       setDnError("Weclapp-Request fehlgeschlagen (Netzwerk/JSON).");
       setDnLoaded(false);
     } finally {
@@ -915,8 +893,8 @@ export default function Page() {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(11);
     writeLine(`Kunde: ${customerName || "—"}`);
-    writeLine(`Eingabe (Lieferschein/Shipment): ${dnInput || "—"}`);
-    writeLine(`Belegnummer: ${documentNumber || "—"}`);
+    writeLine(`Belegnummer (Eingabe): ${dnInput || "—"}`);
+    writeLine(`Belegnummer (Weclapp): ${documentNumber || "—"}`);
     writeLine(`Auftragsnummer: ${salesOrderNumber || "—"}`);
     writeLine(`Gerätetyp: ${deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet"}`);
     writeLine(`Bearbeiter: ${operator || "—"}`);
@@ -971,7 +949,6 @@ export default function Page() {
   const renderField = (f: FieldDef, r: Row) => {
     if (!shouldShowField(r, f)) return null;
 
-    // yn
     if (f.type === "yn") {
       if (f.key === "visual") {
         return (
@@ -980,7 +957,6 @@ export default function Page() {
             <SelectYN
               value={r.visual}
               onChange={(v) => {
-                // visual comment resets when not "no"
                 setRows((prev) =>
                   prev.map((x, i) =>
                     i === activeIdx ? { ...x, visual: v, visualComment: v === "no" ? (x.visualComment || "") : "" } : x,
@@ -1008,7 +984,6 @@ export default function Page() {
           <SelectYN
             value={current}
             onChange={(v) => {
-              // ✅ keep classic OS/IoT reset behaviors
               if (f.key === "osInstalled") {
                 setRows((prev) =>
                   prev.map((x, i) => {
@@ -1017,7 +992,6 @@ export default function Page() {
                       return {
                         ...x,
                         osInstalled: v,
-                        // clear OS check booleans if present
                         driversOk: false,
                         updatesDone: false,
                         powerPlanSet: false,
@@ -1051,7 +1025,6 @@ export default function Page() {
       );
     }
 
-    // boolean
     if (f.type === "boolean") {
       const current = Boolean((r as any)[f.key]);
       return (
@@ -1062,7 +1035,6 @@ export default function Page() {
       );
     }
 
-    // text
     const current = String((r as any)[f.key] ?? "");
     return (
       <div key={f.key} className="space-y-2">
@@ -1183,18 +1155,11 @@ export default function Page() {
                     {dnLoaded ? (
                       <>
                         <span className="text-white/60 font-semibold">Kunde:</span> <span className="text-white font-semibold">{customerName}</span>{" "}
-                        <span className="text-white/35">•</span> <span className="text-white/60 font-semibold">Eingabe:</span>{" "}
-                        <span className="text-white font-semibold">{dnInput}</span>
-                        {documentNumber ? (
-                          <>
-                            {" "}
-                            <span className="text-white/35">•</span> <span className="text-white/60 font-semibold">Beleg:</span>{" "}
-                            <span className="text-white font-semibold">{documentNumber}</span>
-                          </>
-                        ) : null}
+                        <span className="text-white/35">•</span> <span className="text-white/60 font-semibold">Beleg:</span>{" "}
+                        <span className="text-white font-semibold">{documentNumber || dnInput}</span>
                       </>
                     ) : (
-                      <span className="text-white/70">Bitte zuerst einen Lieferschein/Shipment laden.</span>
+                      <span className="text-white/70">Bitte zuerst einen Lieferschein (Belegnummer) laden.</span>
                     )}
                   </div>
 
@@ -1237,7 +1202,6 @@ export default function Page() {
                           // ignore
                         }
 
-                        // ✅ Nur Auth zurücksetzen, NICHT den Arbeitsstand löschen
                         setIsAuthed(false);
                         setLoginPassword("");
                         setLoginError(null);
@@ -1312,7 +1276,10 @@ export default function Page() {
         {/* DELIVERY */}
         {step === "delivery" && (
           <Card>
-            <CardHeader title="Lieferschein / Shipment holen" desc="Eingabe z. B. Lieferschein-/Shipment-Nummer oder ID → Live aus Weclapp." />
+            <CardHeader
+              title="Lieferschein holen (Belegnummer)"
+              desc='Eingabe ist IMMER die Belegnummer (z. B. "31147"). Es werden NUR Seriennummern aus "Barebone Mini-PC" / "Rugged Tablet" geladen.'
+            />
             <CardBody>
               <div className="space-y-4">
                 <div className="flex flex-col sm:flex-row gap-3 max-w-2xl">
@@ -1320,7 +1287,7 @@ export default function Page() {
                     className="w-full h-11 rounded-2xl border border-neutral-200 bg-white px-4 text-sm outline-none focus:ring-2 focus:ring-[#f15124] dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
                     value={dnInput}
                     onChange={(e) => setDnInput(e.target.value)}
-                    placeholder="z. B. 31969"
+                    placeholder='z. B. "31147"'
                     onKeyDown={(e) => {
                       if (e.key === "Enter") loadDeliveryFromWeclapp();
                     }}
@@ -1350,10 +1317,10 @@ export default function Page() {
                       <b>Kunde:</b> {customerName || "—"}
                     </div>
                     <div>
-                      <b>Eingabe:</b> {dnInput}
+                      <b>Eingabe (Belegnummer):</b> {dnInput}
                     </div>
                     <div>
-                      <b>Belegnummer:</b> {documentNumber || "—"}
+                      <b>Belegnummer (Weclapp):</b> {documentNumber || "—"}
                     </div>
                     <div>
                       <b>Auftragsnummer:</b> {salesOrderNumber || "—"}
@@ -1363,28 +1330,14 @@ export default function Page() {
                       <span className="font-semibold">{deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet"}</span>
                     </div>
 
-                    <div className="flex flex-col gap-1">
-                      <b>Produkt(e):</b>
-                      {productNames.length ? (
-                        <div className="flex flex-wrap gap-2">
-                          {productNames.map((p) => (
-                            <Chip key={p}>{p}</Chip>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-sm text-neutral-500 dark:text-neutral-300">—</div>
-                      )}
-                    </div>
-
+                    {/* ✅ WICHTIG: Hier nur relevante Warengruppen zeigen (keine RAM/SSD/CPU etc.) */}
                     <div className="flex flex-col gap-1">
                       <b>Relevante Geräte (Warengruppe):</b>
-                      {deviceItems.length ? (
+                      {relevantDeviceItems.length ? (
                         <div className="flex flex-wrap gap-2">
-                          {deviceItems
-                            .filter((x) => (x.categoryName || "").trim() === "Barebone Mini-PC" || (x.categoryName || "").trim() === "Rugged Tablet")
-                            .map((x) => (
-                              <Chip key={`${x.articleId}-${x.title}`}>{`${x.categoryName || "—"}: ${x.title}`}</Chip>
-                            ))}
+                          {relevantDeviceItems.map((x) => (
+                            <Chip key={`${x.articleId}-${x.title}`}>{`${(x.categoryName || "").trim()}: ${x.title}`}</Chip>
+                          ))}
                         </div>
                       ) : (
                         <div className="text-sm text-neutral-500 dark:text-neutral-300">—</div>
@@ -1513,7 +1466,13 @@ export default function Page() {
                           }`}
                         >
                           <span className="font-mono text-sm truncate">{r.sn}</span>
-                          {status === "fertig" ? <Chip tone="green">fertig</Chip> : status === "bestätigt" ? <Chip tone="blue">bestätigt</Chip> : <Chip>offen</Chip>}
+                          {status === "fertig" ? (
+                            <Chip tone="green">fertig</Chip>
+                          ) : status === "bestätigt" ? (
+                            <Chip tone="blue">bestätigt</Chip>
+                          ) : (
+                            <Chip>offen</Chip>
+                          )}
                         </button>
                       );
                     })}
@@ -1545,15 +1504,10 @@ export default function Page() {
                       </div>
 
                       <div className="mt-6 space-y-6">
-                        {/* ✅ Sections + fields */}
                         {deviceSections.map((sec) => (
                           <div key={sec.title} className="space-y-4">
-                            <div className="text-xs font-extrabold tracking-wide text-neutral-500 dark:text-neutral-300 uppercase">
-                              {sec.title}
-                            </div>
-                            <div className="space-y-5">
-                              {(sec.fields || []).map((f) => renderField(f as any, activeRow))}
-                            </div>
+                            <div className="text-xs font-extrabold tracking-wide text-neutral-500 dark:text-neutral-300 uppercase">{sec.title}</div>
+                            <div className="space-y-5">{(sec.fields || []).map((f) => renderField(f as any, activeRow))}</div>
                           </div>
                         ))}
 
@@ -1591,26 +1545,13 @@ export default function Page() {
                   <b>Kunde:</b> {customerName}
                 </div>
                 <div>
-                  <b>Eingabe:</b> {dnInput}
+                  <b>Belegnummer (Eingabe):</b> {dnInput}
                 </div>
                 <div>
-                  <b>Belegnummer:</b> {documentNumber || "—"}
+                  <b>Belegnummer (Weclapp):</b> {documentNumber || "—"}
                 </div>
                 <div>
                   <b>Auftragsnummer:</b> {salesOrderNumber || "—"}
-                </div>
-
-                <div className="flex flex-col gap-1">
-                  <b>Produkt(e):</b>
-                  {productNames.length ? (
-                    <div className="flex flex-wrap gap-2">
-                      {productNames.map((p) => (
-                        <Chip key={p}>{p}</Chip>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-neutral-500 dark:text-neutral-300">—</div>
-                  )}
                 </div>
 
                 <div>
@@ -1693,16 +1634,13 @@ export default function Page() {
                     <b>Kunde:</b> {customerName}
                   </div>
                   <div>
-                    <b>Eingabe:</b> {dnInput}
+                    <b>Belegnummer (Eingabe):</b> {dnInput}
                   </div>
                   <div>
-                    <b>Belegnummer:</b> {documentNumber || "—"}
+                    <b>Belegnummer (Weclapp):</b> {documentNumber || "—"}
                   </div>
                   <div>
                     <b>Auftragsnummer:</b> {salesOrderNumber || "—"}
-                  </div>
-                  <div>
-                    <b>Produkt(e):</b> {productNames.length ? productNames.join(" • ") : "—"}
                   </div>
                   <div>
                     <b>Gerätetyp:</b> {deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet"}
