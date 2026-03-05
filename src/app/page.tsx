@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Check, AlertTriangle, Search, ArrowLeft, ArrowRight, Eye, EyeOff, Download, Loader2 } from "lucide-react";
+import { Check, AlertTriangle, Search, ArrowLeft, ArrowRight, Eye, EyeOff, Download, Loader2, UploadCloud } from "lucide-react";
 import jsPDF from "jspdf";
 
 // ✅ Relativer Import, damit kein @/ Alias nötig ist
@@ -12,24 +12,35 @@ import { loadLayouts } from "../lib/layoutConfig";
  * Types (tolerant & robust)
  * ========================= */
 
+// Yn value used in UI
 type Yn = "unset" | "yes" | "no";
+
+// device type
 type DeviceType = "mini" | "rugged";
 
+// showWhen structure (optional)
 type ShowWhen =
   | { key: string; eqYn: Yn }
   | { key: string; eqBool: boolean };
 
+// field types supported
 type FieldType = "yn" | "boolean" | "text";
 
+// field definition (tolerant: admin may add properties)
 type FieldDef = {
   key: string;
   label: string;
   type: FieldType;
   required?: boolean;
+
+  // optional: conditional visibility
   showWhen?: ShowWhen;
+
+  // optional helpers (if you later extend)
   requiresCommentWhenNo?: boolean;
 };
 
+// sections config
 type SectionDef = {
   title: string;
   fields: FieldDef[];
@@ -45,19 +56,24 @@ type Layouts = Record<DeviceType, LayoutConfig>;
 
 type Step = "delivery" | "checks" | "summary";
 
+// ✅ Row: fixed core fields + dynamic custom fields
 type Row = {
   sn: string;
   confirmed: boolean;
 
+  // shared
   visual: Yn;
   visualComment: string;
   shake: Yn;
 
+  // Mini relevant
   osInstalled: Yn;
   ssdDetected: Yn;
 
+  // Rugged relevant
   iotInstalled: Yn;
 
+  // allow custom fields (added via admin)
   [key: string]: any;
 };
 
@@ -85,7 +101,12 @@ type WeclappDeliveryNoteResponse = {
 
   deviceItems?: WeclappDeviceItem[];
   deviceSerials?: string[];
-  deviceType?: DeviceType;
+
+  // tolerant: your API returns raw shipment sometimes
+  raw?: any;
+
+  // tolerant: some versions may return shipmentId directly
+  shipmentId?: string;
 };
 
 const ORANGE = "#f15124";
@@ -103,13 +124,16 @@ function emptyRow(sn: string): Row {
     sn,
     confirmed: false,
 
+    // shared
     visual: "unset",
     visualComment: "",
     shake: "unset",
 
+    // mini core
     osInstalled: "unset",
     ssdDetected: "unset",
 
+    // rugged core
     iotInstalled: "unset",
   };
 }
@@ -123,20 +147,13 @@ function boolLabel(v: boolean) {
   return v ? "Ja" : "Nein";
 }
 
-function isRelevantCategoryName(name?: string) {
-  const n = (name || "").trim();
-  return n === "Barebone Mini-PC" || n === "Rugged Tablet";
-}
-
-function inferDeviceTypeFromDeviceItems(items: WeclappDeviceItem[]): DeviceType {
-  const hasRugged = items.some((x) => (x.categoryName || "").trim() === "Rugged Tablet");
-  return hasRugged ? "rugged" : "mini";
-}
-
 /**
- * Visibility logic
+ * ✅ Central visibility logic:
+ * 1) if field has showWhen -> apply it
+ * 2) else apply known production rules (compat to your workflow)
  */
 function shouldShowField(row: Row, f: FieldDef): boolean {
+  // (1) showWhen from admin
   if (f.showWhen && typeof f.showWhen === "object" && "key" in f.showWhen) {
     const cond = f.showWhen as any;
     const val: any = (row as any)[cond.key];
@@ -144,12 +161,16 @@ function shouldShowField(row: Row, f: FieldDef): boolean {
     if ("eqBool" in cond) return Boolean(val) === cond.eqBool;
   }
 
+  // (2) fallback production rules (classic)
+  // - ssdDetected only when osInstalled=no
   if (f.key === "ssdDetected") return row.osInstalled === "no";
 
+  // - OS checks only when osInstalled=yes
   if (["driversOk", "updatesDone", "powerPlanSet", "windowsActivated"].includes(f.key)) {
     return row.osInstalled === "yes";
   }
 
+  // - Rugged IoT sub-checks only when iotInstalled=yes
   if (["cameraAppInstalled", "controlCenterInstalled"].includes(f.key)) {
     return row.iotInstalled === "yes";
   }
@@ -158,24 +179,27 @@ function shouldShowField(row: Row, f: FieldDef): boolean {
 }
 
 function isFieldComplete(row: Row, f: FieldDef): boolean {
-  if (!shouldShowField(row, f)) return true;
+  if (!shouldShowField(row, f)) return true; // hidden fields don't block
 
   const v: any = (row as any)[f.key];
 
   if (f.type === "yn") {
     if (v === "unset") return false;
 
+    // special: visual comment required when "no"
     if (f.key === "visual" && v === "no") {
       return (row.visualComment || "").trim().length > 0;
     }
+
     return true;
   }
 
   if (f.type === "boolean") {
-    if (!f.required) return true;
+    if (!f.required) return true; // optional boolean can stay false
     return v === true;
   }
 
+  // text
   if (!f.required) return true;
   return String(v ?? "").trim().length > 0;
 }
@@ -284,7 +308,7 @@ function CheckToggle({ label, checked, onChange }: { label: string; checked: boo
 }
 
 /**
- * SignaturePad
+ * ✅ SignaturePad (stable)
  */
 function SignaturePad({
   value,
@@ -440,11 +464,14 @@ export default function Page() {
     { key: "summary", label: "Zusammenfassung" },
   ];
 
+  // ✅ localStorage keys (MÜSSEN vor useEffect stehen)
   const LS_USER_STATE = "nextwave_user_state_v1";
   const LS_USER_OPERATOR = "nextwave_user_operator_v1";
 
+  // ✅ layouts from lib (admin saves into LocalStorage, loadLayouts reads it)
   const [layouts, setLayouts] = useState<Layouts>(() => loadLayouts() as any);
 
+  // ✅ State: MUSS vor useEffects stehen, die es benutzen
   const [step, setStep] = useState<Step>("delivery");
   const [deviceType, setDeviceType] = useState<DeviceType>("mini");
 
@@ -461,15 +488,18 @@ export default function Page() {
   const [showPassword, setShowPassword] = useState(false);
 
   // delivery / workflow state
-  const [dnInput, setDnInput] = useState(""); // ✅ EXAKTE Belegnummer (z. B. 31147)
+  const [dnInput, setDnInput] = useState(""); // ✅ real
   const [dnLoaded, setDnLoaded] = useState(false);
 
   const [documentNumber, setDocumentNumber] = useState<string>("");
   const [salesOrderNumber, setSalesOrderNumber] = useState<string>("");
 
   const [customerName, setCustomerName] = useState<string>("");
-  const [productNames, setProductNames] = useState<string[]>([]); // komplette Positionstitel (optional)
-  const [deviceItems, setDeviceItems] = useState<WeclappDeviceItem[]>([]); // NUR relevante Warengruppen
+  const [productNames, setProductNames] = useState<string[]>([]);
+  const [deviceItems, setDeviceItems] = useState<WeclappDeviceItem[]>([]);
+
+  // ✅ IMPORTANT: we store shipmentId for upload
+  const [shipmentId, setShipmentId] = useState<string>("");
 
   const [dnLoading, setDnLoading] = useState(false);
   const [dnError, setDnError] = useState<string | null>(null);
@@ -490,14 +520,20 @@ export default function Page() {
   const [signatureDataUrl, setSignatureDataUrl] = useState<string>("");
   const [showPdfPreview, setShowPdfPreview] = useState(false);
 
+  // upload state
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadOkMsg, setUploadOkMsg] = useState<string | null>(null);
+
   useEffect(() => {
     const onFocus = () => setLayouts(loadLayouts() as any);
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
-  // Restore UI + Session after reload
+  // ✅ Restore UI + Session after reload (keine Abmeldung durch Reload)
   useEffect(() => {
+    // 1) State restore (Arbeitsstand)
     try {
       const raw = localStorage.getItem(LS_USER_STATE);
       if (raw) {
@@ -516,6 +552,8 @@ export default function Page() {
         if (Array.isArray(s.productNames)) setProductNames(s.productNames);
         if (Array.isArray(s.deviceItems)) setDeviceItems(s.deviceItems);
 
+        if (typeof s.shipmentId === "string") setShipmentId(s.shipmentId);
+
         if (Array.isArray(s.expectedSerials)) setExpectedSerials(s.expectedSerials);
         if (Array.isArray(s.rows)) setRows(s.rows);
         if (typeof s.activeIdx === "number") setActiveIdx(s.activeIdx);
@@ -533,6 +571,7 @@ export default function Page() {
       // ignore
     }
 
+    // 2) Session restore (Cookie prüfen)
     (async () => {
       try {
         const r = await fetch("/api/auth/session", { method: "GET", cache: "no-store" });
@@ -540,6 +579,8 @@ export default function Page() {
 
         if (j?.ok) {
           setIsAuthed(true);
+
+          // Operator-Name aus localStorage wiederherstellen
           const op = localStorage.getItem(LS_USER_OPERATOR) || "";
           if (op) setOperator(op);
         }
@@ -550,7 +591,7 @@ export default function Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Persist Arbeitsstand
+  // ✅ Persist Arbeitsstand automatisch (nur Reset darf löschen)
   useEffect(() => {
     const t = window.setTimeout(() => {
       try {
@@ -567,6 +608,8 @@ export default function Page() {
           customerName,
           productNames,
           deviceItems,
+
+          shipmentId,
 
           expectedSerials,
           rows,
@@ -598,6 +641,7 @@ export default function Page() {
     customerName,
     productNames,
     deviceItems,
+    shipmentId,
     expectedSerials,
     rows,
     activeIdx,
@@ -624,6 +668,7 @@ export default function Page() {
   const activeRow = activeIdx >= 0 ? rows[activeIdx] : undefined;
   const totalExpected = expectedSerials.length;
 
+  // ✅ dynamic fields from selected device layout
   const deviceSections: SectionDef[] = useMemo(() => {
     const cfg = (layouts as any)?.[deviceType] as LayoutConfig | undefined;
     return cfg?.sections?.length ? (cfg.sections as any) : [];
@@ -644,10 +689,6 @@ export default function Page() {
     if (!q) return rows;
     return rows.filter((r) => r.sn.includes(q));
   }, [rows, search]);
-
-  const relevantDeviceItems = useMemo(() => {
-    return (deviceItems || []).filter((x) => isRelevantCategoryName(x.categoryName));
-  }, [deviceItems]);
 
   const focusScan = () => {
     window.setTimeout(() => {
@@ -672,7 +713,7 @@ export default function Page() {
     setScanError(null);
 
     if (!expectedSerials.includes(sn)) {
-      setScanError(`Achtung! Diese S/N wurde im Lieferschein ${dnInput} nicht erfasst: ${sn}`);
+      setScanError(`Achtung! Diese S/N wurde im Shipment ${dnInput} nicht erfasst: ${sn}`);
       return;
     }
 
@@ -708,6 +749,7 @@ export default function Page() {
   }, [step]);
 
   const resetAll = () => {
+    // ✅ gespeicherten Arbeitsstand wirklich löschen
     try {
       localStorage.removeItem("nextwave_user_state_v1");
       localStorage.removeItem("nextwave_user_operator_v1");
@@ -735,11 +777,17 @@ export default function Page() {
     setProductNames([]);
     setDeviceItems([]);
 
+    setShipmentId("");
+
     setSignatureInitials("");
     setSignatureDataUrl("");
     setShowPdfPreview(false);
 
     setDeviceType("mini");
+
+    setUploading(false);
+    setUploadError(null);
+    setUploadOkMsg(null);
   };
 
   const doLogin = async () => {
@@ -753,6 +801,7 @@ export default function Page() {
     }
 
     try {
+      // ✅ Serverseitig Cookie setzen
       const r = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -779,18 +828,15 @@ export default function Page() {
     setRows((prev) => prev.map((x, i) => (i === activeIdx ? { ...x, [key]: value } : x)));
   };
 
-  /**
-   * ✅ REAL: Lieferschein/Shipment aus Weclapp holen
-   * - Input ist EXAKT die Belegnummer (shipmentNumber), z. B. 31147
-   * - deviceItems/deviceSerials kommen NUR aus Warengruppen:
-   *   Barebone Mini-PC / Rugged Tablet
-   */
+  // ✅ REAL: Shipment aus Weclapp holen
   const loadDeliveryFromWeclapp = async () => {
     const input = (dnInput || "").trim();
     if (!input) return;
 
     setDnLoading(true);
     setDnError(null);
+    setUploadError(null);
+    setUploadOkMsg(null);
 
     try {
       const r = await fetch(`/api/weclapp/delivery-note?number=${encodeURIComponent(input)}`, {
@@ -806,14 +852,22 @@ export default function Page() {
         return;
       }
 
-      // Wichtig: UI NICHT "irgendeinen" anderen Beleg anzeigen
-      // -> wir übernehmen genau was zurückkommt
       const cust = (j.customerName || "").trim();
       const prods = Array.isArray(j.productNames) ? j.productNames : [];
       const items = Array.isArray(j.deviceItems) ? j.deviceItems : [];
       const sns = Array.isArray(j.deviceSerials) ? j.deviceSerials : [];
 
-      const inferred: DeviceType = inferDeviceTypeFromDeviceItems(items);
+      // ✅ shipmentId zuverlässig aus response holen (raw.id ODER shipmentId)
+      const sid =
+        (typeof (j as any)?.shipmentId === "string" && (j as any).shipmentId.trim()) ? (j as any).shipmentId.trim()
+        : (typeof (j as any)?.raw?.id === "string" && (j as any).raw.id.trim()) ? (j as any).raw.id.trim()
+        : "";
+
+      setShipmentId(sid);
+
+      // Gerätetyp aus Warengruppe ableiten (stabil, unabhängig vom Produktnamen)
+      const hasRugged = items.some((x) => (x.categoryName || "").trim() === "Rugged Tablet");
+      const inferred: DeviceType = hasRugged ? "rugged" : "mini";
       setDeviceType(inferred);
 
       const normalized = sns.map(normalizeSn).filter(Boolean);
@@ -836,13 +890,116 @@ export default function Page() {
       setSignatureInitials("");
       setSignatureDataUrl("");
 
+      // refresh layouts in case admin changed them
       setLayouts(loadLayouts() as any);
-    } catch {
+    } catch (e: any) {
       setDnError("Weclapp-Request fehlgeschlagen (Netzwerk/JSON).");
       setDnLoaded(false);
     } finally {
       setDnLoading(false);
     }
+  };
+
+  // ✅ create a PDF Blob (for upload + download)
+  const buildPdfBlob = (): Blob => {
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+
+    const margin = 40;
+    let y = 50;
+
+    const writeLine = (text: string, fontSize = 11, gap = 16) => {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(fontSize);
+      const lines = doc.splitTextToSize(text, 515);
+      doc.text(lines, margin, y);
+      y += lines.length * gap;
+      if (y > 770) {
+        doc.addPage();
+        y = 50;
+      }
+    };
+
+    const renderFieldToPdf = (r: Row, f: FieldDef) => {
+      if (!shouldShowField(r, f)) return;
+
+      const v: any = (r as any)[f.key];
+
+      if (f.type === "yn") {
+        if (f.key === "visual") {
+          writeLine(`${f.label}: ${ynLabel(r.visual)}${r.visual === "no" ? ` (Kommentar: ${r.visualComment || "—"})` : ""}`);
+          return;
+        }
+        writeLine(`${f.label}: ${ynLabel((v as Yn) ?? "unset")}`);
+        return;
+      }
+
+      if (f.type === "boolean") {
+        writeLine(`${f.label}: ${boolLabel(Boolean(v))}`);
+        return;
+      }
+
+      writeLine(`${f.label}: ${String(v ?? "").trim() || "—"}`);
+    };
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text("NEXTWAVE – Fertigungsprotokoll", margin, y);
+    y += 22;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    writeLine(`Kunde: ${customerName || "—"}`);
+    writeLine(`Eingabe (Shipment): ${dnInput || "—"}`);
+    writeLine(`Belegnummer: ${documentNumber || "—"}`);
+    writeLine(`Auftragsnummer: ${salesOrderNumber || "—"}`);
+    writeLine(`Gerätetyp: ${deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet"}`);
+    writeLine(`Bearbeiter: ${operator || "—"}`);
+    writeLine(`Datum: ${todayStr}`);
+    y += 8;
+
+    doc.setDrawColor(220);
+    doc.line(margin, y, 555, y);
+    y += 18;
+
+    doc.setFont("helvetica", "bold");
+    doc.text("Einheiten", margin, y);
+    y += 18;
+
+    rows.forEach((r, idx) => {
+      doc.setFont("helvetica", "bold");
+      doc.text(`${idx + 1}. ${r.sn}`, margin, y);
+      y += 14;
+
+      doc.setFont("helvetica", "normal");
+      writeLine(`Scan: ${r.confirmed ? "Durchgeführt" : "Nicht durchgeführt"}`);
+
+      deviceFields.forEach((f) => renderFieldToPdf(r, f));
+
+      y += 8;
+      doc.setDrawColor(235);
+      doc.line(margin, y, 555, y);
+      y += 16;
+    });
+
+    if (signatureDataUrl) {
+      try {
+        if (y > 680) {
+          doc.addPage();
+          y = 50;
+        }
+        doc.setFont("helvetica", "bold");
+        doc.text("Unterschrift", margin, y);
+        y += 12;
+
+        doc.addImage(signatureDataUrl, "PNG", margin, y, 250, 90);
+        y += 110;
+      } catch {
+        // ignore
+      }
+    }
+
+    const blob = doc.output("blob");
+    return blob;
   };
 
   const downloadPdf = () => {
@@ -893,8 +1050,8 @@ export default function Page() {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(11);
     writeLine(`Kunde: ${customerName || "—"}`);
-    writeLine(`Belegnummer (Eingabe): ${dnInput || "—"}`);
-    writeLine(`Belegnummer (Weclapp): ${documentNumber || "—"}`);
+    writeLine(`Eingabe (Shipment): ${dnInput || "—"}`);
+    writeLine(`Belegnummer: ${documentNumber || "—"}`);
     writeLine(`Auftragsnummer: ${salesOrderNumber || "—"}`);
     writeLine(`Gerätetyp: ${deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet"}`);
     writeLine(`Bearbeiter: ${operator || "—"}`);
@@ -946,9 +1103,61 @@ export default function Page() {
     doc.save(`NEXTWAVE_Fertigungsprotokoll_${safeDn}.pdf`);
   };
 
+  // ✅ Upload PDF to Weclapp via your existing demo route:
+  // POST /api/weclapp/shipment/[id]/upload  (multipart/form-data, file field "file")
+  const uploadToWeclapp = async () => {
+    setUploadError(null);
+    setUploadOkMsg(null);
+
+    if (!dnLoaded) {
+      setUploadError("Bitte zuerst ein Shipment laden.");
+      return;
+    }
+    if (!shipmentId) {
+      setUploadError("Shipment-ID fehlt (intern). Bitte Shipment erneut laden.");
+      return;
+    }
+    if (!isChecksComplete) {
+      setUploadError("Bitte erst alle Einheiten vollständig ausfüllen (Fertigung fertig), dann hochladen.");
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const pdfBlob = buildPdfBlob();
+
+      const safeDn = (dnInput || "SHIPMENT").replace(/[^\w\-]+/g, "_");
+      const filename = `NEXTWAVE_Fertigungsprotokoll_${safeDn}.pdf`;
+
+      const fd = new FormData();
+      fd.append("file", pdfBlob, filename);
+      fd.append("name", filename);
+      fd.append("description", `NEXTWAVE Fertigungsprotokoll – Shipment ${dnInput} – ${customerName || "Kunde"}`);
+
+      const r = await fetch(`/api/weclapp/shipment/${encodeURIComponent(shipmentId)}/upload`, {
+        method: "POST",
+        body: fd,
+      });
+
+      const j = await r.json().catch(() => null);
+
+      if (!r.ok || !j?.success) {
+        setUploadError(j?.error || `Upload fehlgeschlagen (HTTP ${r.status}).`);
+        return;
+      }
+
+      setUploadOkMsg("✅ Upload erfolgreich – Dokument wurde am Shipment gespeichert.");
+    } catch (e: any) {
+      setUploadError("Upload fehlgeschlagen (Netzwerk/Server).");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const renderField = (f: FieldDef, r: Row) => {
     if (!shouldShowField(r, f)) return null;
 
+    // yn
     if (f.type === "yn") {
       if (f.key === "visual") {
         return (
@@ -957,6 +1166,7 @@ export default function Page() {
             <SelectYN
               value={r.visual}
               onChange={(v) => {
+                // visual comment resets when not "no"
                 setRows((prev) =>
                   prev.map((x, i) =>
                     i === activeIdx ? { ...x, visual: v, visualComment: v === "no" ? (x.visualComment || "") : "" } : x,
@@ -984,6 +1194,7 @@ export default function Page() {
           <SelectYN
             value={current}
             onChange={(v) => {
+              // ✅ keep classic OS/IoT reset behaviors
               if (f.key === "osInstalled") {
                 setRows((prev) =>
                   prev.map((x, i) => {
@@ -992,6 +1203,7 @@ export default function Page() {
                       return {
                         ...x,
                         osInstalled: v,
+                        // clear OS check booleans if present
                         driversOk: false,
                         updatesDone: false,
                         powerPlanSet: false,
@@ -1025,6 +1237,7 @@ export default function Page() {
       );
     }
 
+    // boolean
     if (f.type === "boolean") {
       const current = Boolean((r as any)[f.key]);
       return (
@@ -1035,6 +1248,7 @@ export default function Page() {
       );
     }
 
+    // text
     const current = String((r as any)[f.key] ?? "");
     return (
       <div key={f.key} className="space-y-2">
@@ -1155,11 +1369,18 @@ export default function Page() {
                     {dnLoaded ? (
                       <>
                         <span className="text-white/60 font-semibold">Kunde:</span> <span className="text-white font-semibold">{customerName}</span>{" "}
-                        <span className="text-white/35">•</span> <span className="text-white/60 font-semibold">Beleg:</span>{" "}
-                        <span className="text-white font-semibold">{documentNumber || dnInput}</span>
+                        <span className="text-white/35">•</span> <span className="text-white/60 font-semibold">Eingabe:</span>{" "}
+                        <span className="text-white font-semibold">{dnInput}</span>
+                        {documentNumber ? (
+                          <>
+                            {" "}
+                            <span className="text-white/35">•</span> <span className="text-white/60 font-semibold">Beleg:</span>{" "}
+                            <span className="text-white font-semibold">{documentNumber}</span>
+                          </>
+                        ) : null}
                       </>
                     ) : (
-                      <span className="text-white/70">Bitte zuerst einen Lieferschein (Belegnummer) laden.</span>
+                      <span className="text-white/70">Bitte zuerst ein Shipment laden.</span>
                     )}
                   </div>
 
@@ -1202,6 +1423,7 @@ export default function Page() {
                           // ignore
                         }
 
+                        // ✅ Nur Auth zurücksetzen, NICHT den Arbeitsstand löschen
                         setIsAuthed(false);
                         setLoginPassword("");
                         setLoginError(null);
@@ -1276,10 +1498,7 @@ export default function Page() {
         {/* DELIVERY */}
         {step === "delivery" && (
           <Card>
-            <CardHeader
-              title="Lieferschein holen (Belegnummer)"
-              desc='Eingabe ist IMMER die Belegnummer (z. B. "31147"). Es werden NUR Seriennummern aus "Barebone Mini-PC" / "Rugged Tablet" geladen.'
-            />
+            <CardHeader title="Shipment holen" desc="Eingabe z. B. Shipment-Nummer → Live aus Weclapp." />
             <CardBody>
               <div className="space-y-4">
                 <div className="flex flex-col sm:flex-row gap-3 max-w-2xl">
@@ -1287,7 +1506,7 @@ export default function Page() {
                     className="w-full h-11 rounded-2xl border border-neutral-200 bg-white px-4 text-sm outline-none focus:ring-2 focus:ring-[#f15124] dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
                     value={dnInput}
                     onChange={(e) => setDnInput(e.target.value)}
-                    placeholder='z. B. "31147"'
+                    placeholder="z. B. 31969"
                     onKeyDown={(e) => {
                       if (e.key === "Enter") loadDeliveryFromWeclapp();
                     }}
@@ -1317,27 +1536,44 @@ export default function Page() {
                       <b>Kunde:</b> {customerName || "—"}
                     </div>
                     <div>
-                      <b>Eingabe (Belegnummer):</b> {dnInput}
+                      <b>Eingabe:</b> {dnInput}
                     </div>
                     <div>
-                      <b>Belegnummer (Weclapp):</b> {documentNumber || "—"}
+                      <b>Belegnummer:</b> {documentNumber || "—"}
                     </div>
                     <div>
                       <b>Auftragsnummer:</b> {salesOrderNumber || "—"}
+                    </div>
+                    <div>
+                      <b>Shipment-ID (intern):</b> {shipmentId || "—"}
                     </div>
                     <div>
                       <b>Gerätetyp (Warengruppe):</b>{" "}
                       <span className="font-semibold">{deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet"}</span>
                     </div>
 
-                    {/* ✅ WICHTIG: Hier nur relevante Warengruppen zeigen (keine RAM/SSD/CPU etc.) */}
+                    <div className="flex flex-col gap-1">
+                      <b>Produkt(e):</b>
+                      {productNames.length ? (
+                        <div className="flex flex-wrap gap-2">
+                          {productNames.map((p) => (
+                            <Chip key={p}>{p}</Chip>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-neutral-500 dark:text-neutral-300">—</div>
+                      )}
+                    </div>
+
                     <div className="flex flex-col gap-1">
                       <b>Relevante Geräte (Warengruppe):</b>
-                      {relevantDeviceItems.length ? (
+                      {deviceItems.length ? (
                         <div className="flex flex-wrap gap-2">
-                          {relevantDeviceItems.map((x) => (
-                            <Chip key={`${x.articleId}-${x.title}`}>{`${(x.categoryName || "").trim()}: ${x.title}`}</Chip>
-                          ))}
+                          {deviceItems
+                            .filter((x) => (x.categoryName || "").trim() === "Barebone Mini-PC" || (x.categoryName || "").trim() === "Rugged Tablet")
+                            .map((x) => (
+                              <Chip key={`${x.articleId}-${x.title}`}>{`${x.categoryName || "—"}: ${x.title}`}</Chip>
+                            ))}
                         </div>
                       ) : (
                         <div className="text-sm text-neutral-500 dark:text-neutral-300">—</div>
@@ -1360,16 +1596,23 @@ export default function Page() {
                       setDocumentNumber("");
                       setSalesOrderNumber("");
 
+                      setCustomerName("");
                       setExpectedSerials([]);
                       setRows([]);
                       setActiveIdx(-1);
                       setSearch("");
                       setScanError(null);
+
                       setProductNames([]);
                       setDeviceItems([]);
+
+                      setShipmentId("");
+
+                      setUploadError(null);
+                      setUploadOkMsg(null);
                     }}
                   >
-                    <ArrowLeft className="mr-2 h-4 w-4" /> Zurücksetzen Lieferschein
+                    <ArrowLeft className="mr-2 h-4 w-4" /> Zurücksetzen Shipment
                   </Btn>
 
                   <Btn
@@ -1466,13 +1709,7 @@ export default function Page() {
                           }`}
                         >
                           <span className="font-mono text-sm truncate">{r.sn}</span>
-                          {status === "fertig" ? (
-                            <Chip tone="green">fertig</Chip>
-                          ) : status === "bestätigt" ? (
-                            <Chip tone="blue">bestätigt</Chip>
-                          ) : (
-                            <Chip>offen</Chip>
-                          )}
+                          {status === "fertig" ? <Chip tone="green">fertig</Chip> : status === "bestätigt" ? <Chip tone="blue">bestätigt</Chip> : <Chip>offen</Chip>}
                         </button>
                       );
                     })}
@@ -1485,7 +1722,7 @@ export default function Page() {
                       Bitte links eine Seriennummer scannen (oder aus der Liste wählen).
                       <div className="flex flex-wrap gap-3 pt-5">
                         <Btn variant="outline" onClick={() => setStep("delivery")}>
-                          <ArrowLeft className="mr-2 h-4 w-4" /> Zurück zu Lieferschein
+                          <ArrowLeft className="mr-2 h-4 w-4" /> Zurück zu Shipment
                         </Btn>
                       </div>
                     </div>
@@ -1504,16 +1741,21 @@ export default function Page() {
                       </div>
 
                       <div className="mt-6 space-y-6">
+                        {/* ✅ Sections + fields */}
                         {deviceSections.map((sec) => (
                           <div key={sec.title} className="space-y-4">
-                            <div className="text-xs font-extrabold tracking-wide text-neutral-500 dark:text-neutral-300 uppercase">{sec.title}</div>
-                            <div className="space-y-5">{(sec.fields || []).map((f) => renderField(f as any, activeRow))}</div>
+                            <div className="text-xs font-extrabold tracking-wide text-neutral-500 dark:text-neutral-300 uppercase">
+                              {sec.title}
+                            </div>
+                            <div className="space-y-5">
+                              {(sec.fields || []).map((f) => renderField(f as any, activeRow))}
+                            </div>
                           </div>
                         ))}
 
                         <div className="flex flex-wrap gap-3 pt-2">
                           <Btn variant="outline" onClick={() => setStep("delivery")}>
-                            <ArrowLeft className="mr-2 h-4 w-4" /> Zurück zu Lieferschein
+                            <ArrowLeft className="mr-2 h-4 w-4" /> Zurück zu Shipment
                           </Btn>
                           <Btn onClick={goNextUnit}>
                             Nächste Einheit <ArrowRight className="ml-2 h-4 w-4" />
@@ -1538,20 +1780,36 @@ export default function Page() {
         {/* SUMMARY */}
         {step === "summary" && (
           <Card>
-            <CardHeader title="Zusammenfassung" desc="PDF Vorschau/Download, Signatur, später Upload zu weclapp." />
+            <CardHeader title="Zusammenfassung" desc="PDF Vorschau/Download, Signatur, Upload zu Weclapp (Shipment Dokumente)." />
             <CardBody>
               <div className="rounded-2xl border border-neutral-200 p-4 bg-neutral-50 space-y-2 dark:border-neutral-800 dark:bg-neutral-950">
                 <div>
                   <b>Kunde:</b> {customerName}
                 </div>
                 <div>
-                  <b>Belegnummer (Eingabe):</b> {dnInput}
+                  <b>Eingabe:</b> {dnInput}
                 </div>
                 <div>
-                  <b>Belegnummer (Weclapp):</b> {documentNumber || "—"}
+                  <b>Belegnummer:</b> {documentNumber || "—"}
                 </div>
                 <div>
                   <b>Auftragsnummer:</b> {salesOrderNumber || "—"}
+                </div>
+                <div>
+                  <b>Shipment-ID (intern):</b> {shipmentId || "—"}
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <b>Produkt(e):</b>
+                  {productNames.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {productNames.map((p) => (
+                        <Chip key={p}>{p}</Chip>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-neutral-500 dark:text-neutral-300">—</div>
+                  )}
                 </div>
 
                 <div>
@@ -1580,6 +1838,14 @@ export default function Page() {
 
                   <SignaturePad value={signatureDataUrl} onChange={setSignatureDataUrl} dark={dark} />
                 </div>
+
+                {uploadError ? (
+                  <div className="mt-3 rounded-2xl border border-red-300 bg-red-50 p-3 text-sm text-red-700">{uploadError}</div>
+                ) : null}
+
+                {uploadOkMsg ? (
+                  <div className="mt-3 rounded-2xl border border-green-300 bg-green-50 p-3 text-sm text-green-800">{uploadOkMsg}</div>
+                ) : null}
               </div>
 
               <div className="flex flex-wrap gap-3 pt-4">
@@ -1589,7 +1855,21 @@ export default function Page() {
 
                 <Btn onClick={() => setShowPdfPreview(true)}>PDF Vorschau</Btn>
 
-                <Btn onClick={() => alert("Upload zu weclapp (kommt als nächster Schritt).")}>Upload zu weclapp</Btn>
+                <Btn disabled={uploading || !isChecksComplete || !shipmentId} onClick={uploadToWeclapp}>
+                  {uploading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Upload…
+                    </>
+                  ) : (
+                    <>
+                      <UploadCloud className="mr-2 h-4 w-4" /> Upload zu Weclapp
+                    </>
+                  )}
+                </Btn>
+              </div>
+
+              <div className="text-xs text-neutral-500 dark:text-neutral-300 pt-2">
+                Upload-Logik: POST multipart/form-data → <b>/api/weclapp/shipment/{shipmentId || "…"} /upload</b> (Route existiert bereits).
               </div>
             </CardBody>
           </Card>
@@ -1634,13 +1914,19 @@ export default function Page() {
                     <b>Kunde:</b> {customerName}
                   </div>
                   <div>
-                    <b>Belegnummer (Eingabe):</b> {dnInput}
+                    <b>Eingabe:</b> {dnInput}
                   </div>
                   <div>
-                    <b>Belegnummer (Weclapp):</b> {documentNumber || "—"}
+                    <b>Belegnummer:</b> {documentNumber || "—"}
                   </div>
                   <div>
                     <b>Auftragsnummer:</b> {salesOrderNumber || "—"}
+                  </div>
+                  <div>
+                    <b>Shipment-ID:</b> {shipmentId || "—"}
+                  </div>
+                  <div>
+                    <b>Produkt(e):</b> {productNames.length ? productNames.join(" • ") : "—"}
                   </div>
                   <div>
                     <b>Gerätetyp:</b> {deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet"}
@@ -1742,7 +2028,18 @@ export default function Page() {
                 <Btn variant="outline" onClick={() => setShowPdfPreview(false)}>
                   Zurück
                 </Btn>
-                <Btn onClick={() => alert("Upload zu weclapp (kommt als nächster Schritt).")}>Upload zu weclapp</Btn>
+
+                <Btn disabled={uploading || !isChecksComplete || !shipmentId} onClick={uploadToWeclapp}>
+                  {uploading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Upload…
+                    </>
+                  ) : (
+                    <>
+                      <UploadCloud className="mr-2 h-4 w-4" /> Upload zu Weclapp
+                    </>
+                  )}
+                </Btn>
               </div>
             </div>
           </div>
