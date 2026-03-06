@@ -143,12 +143,15 @@ function ynLabel(v: Yn) {
   if (v === "no") return "Nein";
   return "—";
 }
+
 function boolLabel(v: boolean) {
   return v ? "Ja" : "Nein";
 }
+
 function getNoCommentKey(fieldKey: string) {
   return fieldKey === "visual" ? "visualComment" : `${fieldKey}Comment`;
 }
+
 function getBoolValue(v: any) {
   return v === true;
 }
@@ -190,15 +193,12 @@ function isFieldComplete(row: Row, f: FieldDef): boolean {
   const v: any = (row as any)[f.key];
 
   if (f.type === "yn") {
-  if (v === "unset") return false;
+    if (v === "unset") return false;
 
-  if (v === "no" && f.requiresCommentWhenNo) {
-    const commentKey = getNoCommentKey(f.key);
-    return String((row as any)[commentKey] ?? "").trim().length > 0;
-  }
-
-  return true;
-}
+    if (v === "no" && f.requiresCommentWhenNo) {
+      const commentKey = getNoCommentKey(f.key);
+      return String((row as any)[commentKey] ?? "").trim().length > 0;
+    }
 
     return true;
   }
@@ -933,23 +933,23 @@ export default function Page() {
 
       const v: any = (r as any)[f.key];
 
-if (f.type === "yn") {
-  const ynValue = (v as Yn) ?? "unset";
-  const commentKey = getNoCommentKey(f.key);
-  const commentValue = String((r as any)[commentKey] ?? "").trim();
+      if (f.type === "yn") {
+        const ynValue = (v as Yn) ?? "unset";
+        const commentKey = getNoCommentKey(f.key);
+        const commentValue = String((r as any)[commentKey] ?? "").trim();
 
-  writeLine(
-    `${f.label}: ${ynLabel(ynValue)}${
-      ynValue === "no" && f.requiresCommentWhenNo ? ` (Kommentar: ${commentValue || "—"})` : ""
-    }`
-  );
-  return;
-}
+        writeLine(
+          `${f.label}: ${ynLabel(ynValue)}${
+            ynValue === "no" && f.requiresCommentWhenNo ? ` (Kommentar: ${commentValue || "—"})` : ""
+          }`
+        );
+        return;
+      }
 
-if (f.type === "boolean") {
-  writeLine(`${f.label}: ${boolLabel(getBoolValue(v))}`);
-  return;
-}
+      if (f.type === "boolean") {
+        writeLine(`${f.label}: ${boolLabel(getBoolValue(v))}`);
+        return;
+      }
 
       writeLine(`${f.label}: ${String(v ?? "").trim() || "—"}`);
     };
@@ -1039,16 +1039,20 @@ if (f.type === "boolean") {
       const v: any = (r as any)[f.key];
 
       if (f.type === "yn") {
-        if (f.key === "visual") {
-          writeLine(`${f.label}: ${ynLabel(r.visual)}${r.visual === "no" ? ` (Kommentar: ${r.visualComment || "—"})` : ""}`);
-          return;
-        }
-        writeLine(`${f.label}: ${ynLabel((v as Yn) ?? "unset")}`);
+        const ynValue = (v as Yn) ?? "unset";
+        const commentKey = getNoCommentKey(f.key);
+        const commentValue = String((r as any)[commentKey] ?? "").trim();
+
+        writeLine(
+          `${f.label}: ${ynLabel(ynValue)}${
+            ynValue === "no" && f.requiresCommentWhenNo ? ` (Kommentar: ${commentValue || "—"})` : ""
+          }`
+        );
         return;
       }
 
       if (f.type === "boolean") {
-        writeLine(`${f.label}: ${boolLabel(Boolean(v))}`);
+        writeLine(`${f.label}: ${boolLabel(getBoolValue(v))}`);
         return;
       }
 
@@ -1154,15 +1158,15 @@ if (f.type === "boolean") {
 
       const j = await r.json().catch(() => null);
 
-if (!r.ok || !j?.success) {
-  const msg =
-    j?.message ||
-    j?.error ||
-    `Upload fehlgeschlagen (HTTP ${r.status}).`;
+      if (!r.ok || !j?.success) {
+        const msg =
+          j?.message ||
+          j?.error ||
+          `Upload fehlgeschlagen (HTTP ${r.status}).`;
 
-  setUploadError(msg);
-  return;
-}
+        setUploadError(msg);
+        return;
+      }
 
       setUploadOkMsg("✅ Upload erfolgreich – Dokument wurde an Weclapp Lieferschein angehängt.");
     } catch (e: any) {
@@ -1176,96 +1180,96 @@ if (!r.ok || !j?.success) {
     if (!shouldShowField(r, f)) return null;
 
     // yn
-if (f.type === "yn") {
-  const current = ((r as any)[f.key] as Yn) ?? "unset";
-  const commentKey = getNoCommentKey(f.key);
-  const commentValue = String((r as any)[commentKey] ?? "");
+    if (f.type === "yn") {
+      const current = ((r as any)[f.key] as Yn) ?? "unset";
+      const commentKey = getNoCommentKey(f.key);
+      const commentValue = String((r as any)[commentKey] ?? "");
 
-  return (
-    <div key={f.key} className="space-y-2">
-      <div className="text-sm font-semibold">{f.label}</div>
-      <SelectYN
-        value={current}
-        onChange={(v) => {
-          if (f.key === "osInstalled") {
-            setRows((prev) =>
-              prev.map((x, i) => {
-                if (i !== activeIdx) return x;
-                if (v === "no") {
-                  return {
-                    ...x,
-                    osInstalled: v,
-                    driversOk: false,
-                    updatesDone: false,
-                    powerPlanSet: false,
-                    windowsActivated: false,
-                    [commentKey]: (x as any)[commentKey] ?? "",
-                  };
-                }
-                if (v === "yes") {
-                  return { ...x, osInstalled: v, ssdDetected: "unset", [commentKey]: "" };
-                }
-                return { ...x, osInstalled: v, [commentKey]: "" };
-              }),
-            );
-            return;
-          }
+      return (
+        <div key={f.key} className="space-y-2">
+          <div className="text-sm font-semibold">{f.label}</div>
+          <SelectYN
+            value={current}
+            onChange={(v) => {
+              if (f.key === "osInstalled") {
+                setRows((prev) =>
+                  prev.map((x, i) => {
+                    if (i !== activeIdx) return x;
+                    if (v === "no") {
+                      return {
+                        ...x,
+                        osInstalled: v,
+                        driversOk: false,
+                        updatesDone: false,
+                        powerPlanSet: false,
+                        windowsActivated: false,
+                        [commentKey]: (x as any)[commentKey] ?? "",
+                      };
+                    }
+                    if (v === "yes") {
+                      return { ...x, osInstalled: v, ssdDetected: "unset", [commentKey]: "" };
+                    }
+                    return { ...x, osInstalled: v, [commentKey]: "" };
+                  }),
+                );
+                return;
+              }
 
-          if (f.key === "iotInstalled") {
-            setRows((prev) =>
-              prev.map((x, i) => {
-                if (i !== activeIdx) return x;
-                if (v === "no") {
-                  return {
-                    ...x,
-                    iotInstalled: v,
-                    cameraAppInstalled: false,
-                    controlCenterInstalled: false,
-                    [commentKey]: (x as any)[commentKey] ?? "",
-                  };
-                }
-                return { ...x, iotInstalled: v, [commentKey]: "" };
-              }),
-            );
-            return;
-          }
+              if (f.key === "iotInstalled") {
+                setRows((prev) =>
+                  prev.map((x, i) => {
+                    if (i !== activeIdx) return x;
+                    if (v === "no") {
+                      return {
+                        ...x,
+                        iotInstalled: v,
+                        cameraAppInstalled: false,
+                        controlCenterInstalled: false,
+                        [commentKey]: (x as any)[commentKey] ?? "",
+                      };
+                    }
+                    return { ...x, iotInstalled: v, [commentKey]: "" };
+                  }),
+                );
+                return;
+              }
 
-          setRows((prev) =>
-            prev.map((x, i) =>
-              i === activeIdx
-                ? {
-                    ...x,
-                    [f.key]: v,
-                    [commentKey]: v === "no" ? ((x as any)[commentKey] ?? "") : "",
-                  }
-                : x,
-            ),
-          );
-        }}
-      />
+              setRows((prev) =>
+                prev.map((x, i) =>
+                  i === activeIdx
+                    ? {
+                        ...x,
+                        [f.key]: v,
+                        [commentKey]: v === "no" ? ((x as any)[commentKey] ?? "") : "",
+                      }
+                    : x,
+                ),
+              );
+            }}
+          />
 
-      {current === "no" && f.requiresCommentWhenNo && (
-        <textarea
-          className="w-full min-h-[96px] rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[#f15124] dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
-          placeholder="Kommentar bei NEIN"
-          value={commentValue}
-          onChange={(e) => setFieldValue(commentKey, e.target.value)}
-        />
-      )}
-    </div>
-  );
-}
+          {current === "no" && f.requiresCommentWhenNo && (
+            <textarea
+              className="w-full min-h-[96px] rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[#f15124] dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
+              placeholder="Kommentar bei NEIN"
+              value={commentValue}
+              onChange={(e) => setFieldValue(commentKey, e.target.value)}
+            />
+          )}
+        </div>
+      );
+    }
 
     // boolean
     if (f.type === "boolean") {
-  const current = (r as any)[f.key] === true;
-  return (
-    <div key={f.key} className="space-y-2">
-      <div className="text-sm font-semibold">Checks (Haken setzen)</div>
-      <CheckToggle label={f.label} checked={current} onChange={(v) => setFieldValue(f.key, v)} />
-    </div>
-  );
-}
+      const current = (r as any)[f.key] === true;
+      return (
+        <div key={f.key} className="space-y-2">
+          <div className="text-sm font-semibold">Checks (Haken setzen)</div>
+          <CheckToggle label={f.label} checked={current} onChange={(v) => setFieldValue(f.key, v)} />
+        </div>
+      );
+    }
 
     // text
     const current = String((r as any)[f.key] ?? "");
@@ -1902,7 +1906,7 @@ if (f.type === "yn") {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="p-6 border-b border-neutral-200 dark:border-neutral-800">
-                  <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center justify-between gap-4">
                   <div className="text-lg font-extrabold">PDF Vorschau</div>
 
                   <div className="flex items-center gap-2">
@@ -1929,18 +1933,18 @@ if (f.type === "yn") {
                 </div>
 
                 {/* Upload Status Meldung */}
-{uploadOkMsg && (
-  <div className="px-6 py-3 bg-green-100 text-green-800 text-sm font-semibold border-b border-green-200">
-    {uploadOkMsg}
-  </div>
-)}
+                {uploadOkMsg && (
+                  <div className="px-6 py-3 bg-green-100 text-green-800 text-sm font-semibold border-b border-green-200">
+                    {uploadOkMsg}
+                  </div>
+                )}
 
-{uploadError && (
-  <div className="px-6 py-3 bg-red-100 text-red-800 text-sm font-semibold border-b border-red-200">
-    {uploadError}
-  </div>
-)}
-                
+                {uploadError && (
+                  <div className="px-6 py-3 bg-red-100 text-red-800 text-sm font-semibold border-b border-red-200">
+                    {uploadError}
+                  </div>
+                )}
+
                 <div className="mt-4 rounded-xl border border-neutral-200 dark:border-neutral-800 p-4 text-sm space-y-1">
                   <div>
                     <b>Kunde:</b> {customerName}
@@ -1988,32 +1992,32 @@ if (f.type === "yn") {
 
                           const v: any = (r as any)[f.key];
 
-if (f.type === "yn") {
-  const ynValue = (v as Yn) ?? "unset";
-  const commentKey = getNoCommentKey(f.key);
-  const commentValue = String((r as any)[commentKey] ?? "").trim();
+                          if (f.type === "yn") {
+                            const ynValue = (v as Yn) ?? "unset";
+                            const commentKey = getNoCommentKey(f.key);
+                            const commentValue = String((r as any)[commentKey] ?? "").trim();
 
-  return (
-    <React.Fragment key={f.key}>
-      <div>
-        <b>{f.label}</b> {ynLabel(ynValue)}
-      </div>
-      {ynValue === "no" && f.requiresCommentWhenNo ? (
-        <div>
-          <b>Kommentar:</b> {commentValue || "—"}
-        </div>
-      ) : null}
-    </React.Fragment>
-  );
-}
+                            return (
+                              <React.Fragment key={f.key}>
+                                <div>
+                                  <b>{f.label}</b> {ynLabel(ynValue)}
+                                </div>
+                                {ynValue === "no" && f.requiresCommentWhenNo ? (
+                                  <div>
+                                    <b>Kommentar:</b> {commentValue || "—"}
+                                  </div>
+                                ) : null}
+                              </React.Fragment>
+                            );
+                          }
 
-if (f.type === "boolean") {
-  return (
-    <div key={f.key} className="rounded-lg border border-neutral-200 dark:border-neutral-800 px-3 py-2">
-      {f.label}: <b>{boolLabel(getBoolValue(v))}</b>
-    </div>
-  );
-}
+                          if (f.type === "boolean") {
+                            return (
+                              <div key={f.key} className="rounded-lg border border-neutral-200 dark:border-neutral-800 px-3 py-2">
+                                {f.label}: <b>{boolLabel(getBoolValue(v))}</b>
+                              </div>
+                            );
+                          }
 
                           return (
                             <div key={f.key}>
