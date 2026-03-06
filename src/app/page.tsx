@@ -146,6 +146,12 @@ function ynLabel(v: Yn) {
 function boolLabel(v: boolean) {
   return v ? "Ja" : "Nein";
 }
+function getNoCommentKey(fieldKey: string) {
+  return fieldKey === "visual" ? "visualComment" : `${fieldKey}Comment`;
+}
+function getBoolValue(v: any) {
+  return v === true;
+}
 
 /**
  * ✅ Central visibility logic:
@@ -184,12 +190,15 @@ function isFieldComplete(row: Row, f: FieldDef): boolean {
   const v: any = (row as any)[f.key];
 
   if (f.type === "yn") {
-    if (v === "unset") return false;
+  if (v === "unset") return false;
 
-    // special: visual comment required when "no"
-    if (f.key === "visual" && v === "no") {
-      return (row.visualComment || "").trim().length > 0;
-    }
+  if (v === "no" && f.requiresCommentWhenNo) {
+    const commentKey = getNoCommentKey(f.key);
+    return String((row as any)[commentKey] ?? "").trim().length > 0;
+  }
+
+  return true;
+}
 
     return true;
   }
@@ -924,19 +933,23 @@ export default function Page() {
 
       const v: any = (r as any)[f.key];
 
-      if (f.type === "yn") {
-        if (f.key === "visual") {
-          writeLine(`${f.label}: ${ynLabel(r.visual)}${r.visual === "no" ? ` (Kommentar: ${r.visualComment || "—"})` : ""}`);
-          return;
-        }
-        writeLine(`${f.label}: ${ynLabel((v as Yn) ?? "unset")}`);
-        return;
-      }
+if (f.type === "yn") {
+  const ynValue = (v as Yn) ?? "unset";
+  const commentKey = getNoCommentKey(f.key);
+  const commentValue = String((r as any)[commentKey] ?? "").trim();
 
-      if (f.type === "boolean") {
-        writeLine(`${f.label}: ${boolLabel(Boolean(v))}`);
-        return;
-      }
+  writeLine(
+    `${f.label}: ${ynLabel(ynValue)}${
+      ynValue === "no" && f.requiresCommentWhenNo ? ` (Kommentar: ${commentValue || "—"})` : ""
+    }`
+  );
+  return;
+}
+
+if (f.type === "boolean") {
+  writeLine(`${f.label}: ${boolLabel(getBoolValue(v))}`);
+  return;
+}
 
       writeLine(`${f.label}: ${String(v ?? "").trim() || "—"}`);
     };
@@ -1163,95 +1176,96 @@ if (!r.ok || !j?.success) {
     if (!shouldShowField(r, f)) return null;
 
     // yn
-    if (f.type === "yn") {
-      if (f.key === "visual") {
-        return (
-          <div key={f.key} className="space-y-2">
-            <div className="text-sm font-semibold">{f.label}</div>
-            <SelectYN
-              value={r.visual}
-              onChange={(v) => {
-                // visual comment resets when not "no"
-                setRows((prev) =>
-                  prev.map((x, i) =>
-                    i === activeIdx ? { ...x, visual: v, visualComment: v === "no" ? (x.visualComment || "") : "" } : x,
-                  ),
-                );
-              }}
-            />
-            {r.visual === "no" && (
-              <textarea
-                className="w-full min-h-[96px] rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[#f15124] dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
-                placeholder="Kommentar bei NEIN"
-                value={r.visualComment}
-                onChange={(e) => setFieldValue("visualComment", e.target.value)}
-              />
-            )}
-          </div>
-        );
-      }
+if (f.type === "yn") {
+  const current = ((r as any)[f.key] as Yn) ?? "unset";
+  const commentKey = getNoCommentKey(f.key);
+  const commentValue = String((r as any)[commentKey] ?? "");
 
-      const current = ((r as any)[f.key] as Yn) ?? "unset";
+  return (
+    <div key={f.key} className="space-y-2">
+      <div className="text-sm font-semibold">{f.label}</div>
+      <SelectYN
+        value={current}
+        onChange={(v) => {
+          if (f.key === "osInstalled") {
+            setRows((prev) =>
+              prev.map((x, i) => {
+                if (i !== activeIdx) return x;
+                if (v === "no") {
+                  return {
+                    ...x,
+                    osInstalled: v,
+                    driversOk: false,
+                    updatesDone: false,
+                    powerPlanSet: false,
+                    windowsActivated: false,
+                    [commentKey]: (x as any)[commentKey] ?? "",
+                  };
+                }
+                if (v === "yes") {
+                  return { ...x, osInstalled: v, ssdDetected: "unset", [commentKey]: "" };
+                }
+                return { ...x, osInstalled: v, [commentKey]: "" };
+              }),
+            );
+            return;
+          }
 
-      return (
-        <div key={f.key} className="space-y-2">
-          <div className="text-sm font-semibold">{f.label}</div>
-          <SelectYN
-            value={current}
-            onChange={(v) => {
-              // ✅ keep classic OS/IoT reset behaviors
-              if (f.key === "osInstalled") {
-                setRows((prev) =>
-                  prev.map((x, i) => {
-                    if (i !== activeIdx) return x;
-                    if (v === "no") {
-                      return {
-                        ...x,
-                        osInstalled: v,
-                        // clear OS check booleans if present
-                        driversOk: false,
-                        updatesDone: false,
-                        powerPlanSet: false,
-                        windowsActivated: false,
-                      };
-                    }
-                    if (v === "yes") {
-                      return { ...x, osInstalled: v, ssdDetected: "unset" };
-                    }
-                    return { ...x, osInstalled: v };
-                  }),
-                );
-                return;
-              }
+          if (f.key === "iotInstalled") {
+            setRows((prev) =>
+              prev.map((x, i) => {
+                if (i !== activeIdx) return x;
+                if (v === "no") {
+                  return {
+                    ...x,
+                    iotInstalled: v,
+                    cameraAppInstalled: false,
+                    controlCenterInstalled: false,
+                    [commentKey]: (x as any)[commentKey] ?? "",
+                  };
+                }
+                return { ...x, iotInstalled: v, [commentKey]: "" };
+              }),
+            );
+            return;
+          }
 
-              if (f.key === "iotInstalled") {
-                setRows((prev) =>
-                  prev.map((x, i) => {
-                    if (i !== activeIdx) return x;
-                    if (v === "no") return { ...x, iotInstalled: v, cameraAppInstalled: false, controlCenterInstalled: false };
-                    return { ...x, iotInstalled: v };
-                  }),
-                );
-                return;
-              }
+          setRows((prev) =>
+            prev.map((x, i) =>
+              i === activeIdx
+                ? {
+                    ...x,
+                    [f.key]: v,
+                    [commentKey]: v === "no" ? ((x as any)[commentKey] ?? "") : "",
+                  }
+                : x,
+            ),
+          );
+        }}
+      />
 
-              setFieldValue(f.key, v);
-            }}
-          />
-        </div>
-      );
-    }
+      {current === "no" && f.requiresCommentWhenNo && (
+        <textarea
+          className="w-full min-h-[96px] rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[#f15124] dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-100"
+          placeholder="Kommentar bei NEIN"
+          value={commentValue}
+          onChange={(e) => setFieldValue(commentKey, e.target.value)}
+        />
+      )}
+    </div>
+  );
+}
 
     // boolean
     if (f.type === "boolean") {
-      const current = Boolean((r as any)[f.key]);
-      return (
-        <div key={f.key} className="space-y-2">
-          <div className="text-sm font-semibold">Checks (Haken setzen)</div>
-          <CheckToggle label={f.label} checked={current} onChange={(v) => setFieldValue(f.key, v)} />
-        </div>
-      );
-    }
+  const current = (r as any)[f.key] === true;
+  return (
+    <div key={f.key} className="space-y-2">
+      <div className="text-sm font-semibold">Checks (Haken setzen)</div>
+      <CheckToggle label={f.label} checked={current} onChange={(v) => setFieldValue(f.key, v)} />
+    </div>
+  );
+}
 
     // text
     const current = String((r as any)[f.key] ?? "");
@@ -1974,35 +1988,32 @@ if (!r.ok || !j?.success) {
 
                           const v: any = (r as any)[f.key];
 
-                          if (f.type === "yn") {
-                            if (f.key === "visual") {
-                              return (
-                                <React.Fragment key={f.key}>
-                                  <div>
-                                    <b>{f.label}</b> {ynLabel(r.visual)}
-                                  </div>
-                                  {r.visual === "no" ? (
-                                    <div>
-                                      <b>Kommentar:</b> {r.visualComment || "—"}
-                                    </div>
-                                  ) : null}
-                                </React.Fragment>
-                              );
-                            }
-                            return (
-                              <div key={f.key}>
-                                <b>{f.label}</b> {ynLabel((v as Yn) ?? "unset")}
-                              </div>
-                            );
-                          }
+if (f.type === "yn") {
+  const ynValue = (v as Yn) ?? "unset";
+  const commentKey = getNoCommentKey(f.key);
+  const commentValue = String((r as any)[commentKey] ?? "").trim();
 
-                          if (f.type === "boolean") {
-                            return (
-                              <div key={f.key} className="rounded-lg border border-neutral-200 dark:border-neutral-800 px-3 py-2">
-                                {f.label}: <b>{boolLabel(Boolean(v))}</b>
-                              </div>
-                            );
-                          }
+  return (
+    <React.Fragment key={f.key}>
+      <div>
+        <b>{f.label}</b> {ynLabel(ynValue)}
+      </div>
+      {ynValue === "no" && f.requiresCommentWhenNo ? (
+        <div>
+          <b>Kommentar:</b> {commentValue || "—"}
+        </div>
+      ) : null}
+    </React.Fragment>
+  );
+}
+
+if (f.type === "boolean") {
+  return (
+    <div key={f.key} className="rounded-lg border border-neutral-200 dark:border-neutral-800 px-3 py-2">
+      {f.label}: <b>{boolLabel(getBoolValue(v))}</b>
+    </div>
+  );
+}
 
                           return (
                             <div key={f.key}>
