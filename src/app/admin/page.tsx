@@ -641,7 +641,7 @@ export default function AdminPage() {
                     {edit.draft.required ? "Required" : "Optional"}
                   </button>
 
-                  {"requiresCommentWhenNo" in edit.draft && edit.draft.type === "yn" ? (
+                  {edit.draft.type === "yn" ? (
                     <button
                       type="button"
                       className={`h-11 px-4 rounded-2xl border text-sm font-semibold ${
