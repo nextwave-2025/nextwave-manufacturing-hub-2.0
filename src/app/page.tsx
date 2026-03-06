@@ -1151,7 +1151,7 @@ if (!r.ok || !j?.success) {
   return;
 }
 
-      setUploadOkMsg("✅ Upload erfolgreich – Dokument wurde am Shipment gespeichert.");
+      setUploadOkMsg("✅ Upload erfolgreich – Dokument wurde an Weclapp Lieferschein angehängt.");
     } catch (e: any) {
       setUploadError("Upload fehlgeschlagen (Netzwerk/Server).");
     } finally {
