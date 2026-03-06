@@ -1888,7 +1888,7 @@ if (!r.ok || !j?.success) {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="p-6 border-b border-neutral-200 dark:border-neutral-800">
-                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center justify-between gap-4">
                   <div className="text-lg font-extrabold">PDF Vorschau</div>
 
                   <div className="flex items-center gap-2">
@@ -1914,6 +1914,19 @@ if (!r.ok || !j?.success) {
                   </div>
                 </div>
 
+                {/* Upload Status Meldung */}
+{uploadOkMsg && (
+  <div className="px-6 py-3 bg-green-100 text-green-800 text-sm font-semibold border-b border-green-200">
+    {uploadOkMsg}
+  </div>
+)}
+
+{uploadError && (
+  <div className="px-6 py-3 bg-red-100 text-red-800 text-sm font-semibold border-b border-red-200">
+    {uploadError}
+  </div>
+)}
+                
                 <div className="mt-4 rounded-xl border border-neutral-200 dark:border-neutral-800 p-4 text-sm space-y-1">
                   <div>
                     <b>Kunde:</b> {customerName}
