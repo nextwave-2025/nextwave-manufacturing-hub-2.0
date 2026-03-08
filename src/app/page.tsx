@@ -16,11 +16,10 @@ import {
 } from "lucide-react";
 import jsPDF from "jspdf";
 
-// ✅ Relativer Import, damit kein @/ Alias nötig ist
 import { loadLayouts } from "../lib/layoutConfig";
 
 /** =========================
- * Types (tolerant & robust)
+ * Types
  * ========================= */
 
 type Yn = "unset" | "yes" | "no";
@@ -597,28 +596,20 @@ export default function Page() {
         const snapshot = {
           step,
           deviceType,
-
           dnInput,
           dnLoaded,
-
           documentNumber,
           salesOrderNumber,
-
           customerName,
           productNames,
           deviceItems,
-
           shipmentId,
-
           expectedSerials,
           rows,
           activeIdx,
-
           search,
           autoAdvance,
-
           dark,
-
           signatureInitials,
           signatureDataUrl,
           showPdfPreview,
@@ -690,6 +681,15 @@ export default function Page() {
   const deviceFields: FieldDef[] = useMemo(() => {
     return deviceSections.flatMap((s) => (s?.fields ?? []) as any);
   }, [deviceSections]);
+
+  const relevantDeviceCategory = deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet";
+
+  const relevantPdfProducts = useMemo(() => {
+    return deviceItems
+      .filter((x) => (x.categoryName || "").trim() === relevantDeviceCategory)
+      .map((x) => (x.title || "").trim())
+      .filter(Boolean);
+  }, [deviceItems, relevantDeviceCategory]);
 
   const isRowComplete = (r: Row) => deviceFields.every((f) => isFieldComplete(r, f));
 
@@ -914,21 +914,20 @@ export default function Page() {
 
     const pageWidth = 595.28;
     const pageHeight = 841.89;
-    const margin = 40;
+    const margin = 36;
     const contentWidth = pageWidth - margin * 2;
 
     const colors = {
       orange: [241, 81, 36] as const,
-      dark: [22, 22, 24] as const,
+      dark: [18, 18, 20] as const,
       text: [30, 30, 30] as const,
-      muted: [110, 110, 110] as const,
-      line: [225, 225, 225] as const,
+      muted: [108, 108, 108] as const,
+      line: [226, 226, 226] as const,
       soft: [247, 247, 248] as const,
       white: [255, 255, 255] as const,
-      dangerBg: [255, 245, 243] as const,
-      dangerText: [184, 58, 32] as const,
-      greenBg: [241, 252, 245] as const,
-      greenText: [18, 120, 63] as const,
+      greenBg: [240, 249, 244] as const,
+      greenText: [16, 126, 68] as const,
+      redText: [170, 55, 35] as const,
     };
 
     let y = 0;
@@ -937,18 +936,16 @@ export default function Page() {
     const setFill = (rgb: readonly number[]) => doc.setFillColor(rgb[0], rgb[1], rgb[2]);
     const setDraw = (rgb: readonly number[]) => doc.setDrawColor(rgb[0], rgb[1], rgb[2]);
 
-    const ensureSpace = (needed: number) => {
-      if (y + needed > pageHeight - 50) {
-        doc.addPage();
-        y = 40;
-      }
-    };
-
     const write = (
       text: string,
       x: number,
       yPos: number,
-      options?: { size?: number; bold?: boolean; color?: readonly number[]; align?: "left" | "right" | "center" }
+      options?: {
+        size?: number;
+        bold?: boolean;
+        color?: readonly number[];
+        align?: "left" | "right" | "center";
+      }
     ) => {
       doc.setFont("helvetica", options?.bold ? "bold" : "normal");
       doc.setFontSize(options?.size ?? 10);
@@ -961,7 +958,12 @@ export default function Page() {
       x: number,
       yPos: number,
       maxWidth: number,
-      options?: { size?: number; bold?: boolean; color?: readonly number[]; lineHeight?: number }
+      options?: {
+        size?: number;
+        bold?: boolean;
+        color?: readonly number[];
+        lineHeight?: number;
+      }
     ) => {
       doc.setFont("helvetica", options?.bold ? "bold" : "normal");
       doc.setFontSize(options?.size ?? 10);
@@ -969,6 +971,13 @@ export default function Page() {
       const lines = doc.splitTextToSize(text || "—", maxWidth);
       doc.text(lines, x, yPos);
       return lines.length * (options?.lineHeight ?? 14);
+    };
+
+    const ensureSpace = (needed: number) => {
+      if (y + needed > pageHeight - 46) {
+        doc.addPage();
+        y = 42;
+      }
     };
 
     const drawInfoCard = (
@@ -979,20 +988,27 @@ export default function Page() {
       rowsData: Array<{ label: string; value: string }>
     ) => {
       const rowHeight = 18;
-      const headerHeight = 24;
-      const padding = 12;
-      const cardHeight = headerHeight + padding + rowsData.length * rowHeight + 8;
+      const headHeight = 22;
+      const cardHeight = 22 + rowsData.length * rowHeight + 22;
 
       setFill(colors.soft);
       setDraw(colors.line);
-      doc.roundedRect(startX, startY, width, cardHeight, 12, 12, "FD");
+      doc.roundedRect(startX, startY, width, cardHeight, 14, 14, "FD");
 
-      write(title, startX + 12, startY + 16, { size: 10, bold: true, color: colors.orange });
+      write(title, startX + 16, startY + 20, { size: 10, bold: true, color: colors.orange });
 
-      let yy = startY + 38;
+      let yy = startY + 46;
       rowsData.forEach((row) => {
-        write(`${row.label}:`, startX + 12, yy, { size: 9, bold: true, color: colors.muted });
-        writeWrapped(row.value || "—", startX + 92, yy, width - 104, { size: 9, color: colors.text, lineHeight: 13 });
+        write(`${row.label}:`, startX + 16, yy, {
+          size: 9,
+          bold: true,
+          color: colors.muted,
+        });
+        writeWrapped(row.value || "—", startX + 108, yy, width - 124, {
+          size: 9,
+          color: colors.text,
+          lineHeight: 13,
+        });
         yy += rowHeight;
       });
 
@@ -1002,14 +1018,8 @@ export default function Page() {
     const getFieldValueLabel = (r: Row, f: FieldDef) => {
       const v: any = (r as any)[f.key];
 
-      if (f.type === "yn") {
-        return ynLabel((v as Yn) ?? "unset");
-      }
-
-      if (f.type === "boolean") {
-        return boolLabel(getBoolValue(v));
-      }
-
+      if (f.type === "yn") return ynLabel((v as Yn) ?? "unset");
+      if (f.type === "boolean") return boolLabel(getBoolValue(v));
       return String(v ?? "").trim() || "—";
     };
 
@@ -1018,25 +1028,21 @@ export default function Page() {
         section: string;
         label: string;
         value: string;
-        isComment?: boolean;
-        comment?: string;
+        isSection?: boolean;
       }> = [];
 
       deviceSections.forEach((sec) => {
-        let sectionAdded = false;
+        const visibleFields = (sec.fields || []).filter((f) => shouldShowField(r, f));
+        if (!visibleFields.length) return;
 
-        (sec.fields || []).forEach((f) => {
-          if (!shouldShowField(r, f)) return;
+        lines.push({
+          section: sec.title,
+          label: sec.title,
+          value: "",
+          isSection: true,
+        });
 
-          if (!sectionAdded) {
-            lines.push({
-              section: sec.title,
-              label: "",
-              value: "",
-            });
-            sectionAdded = true;
-          }
-
+        visibleFields.forEach((f) => {
           lines.push({
             section: sec.title,
             label: f.label,
@@ -1053,8 +1059,6 @@ export default function Page() {
                 section: sec.title,
                 label: "Kommentar",
                 value: comment || "—",
-                isComment: true,
-                comment,
               });
             }
           }
@@ -1066,24 +1070,19 @@ export default function Page() {
 
     const estimateUnitHeight = (r: Row) => {
       const lines = getVisibleFieldLines(r);
-      let h = 56;
+      let h = 72;
 
-      let lastSection = "";
       lines.forEach((line) => {
-        if (!line.label && line.section !== lastSection) {
-          h += 26;
-          lastSection = line.section;
+        if (line.isSection) {
+          h += 28;
           return;
         }
 
-        const lineCount = Math.max(
-          1,
-          doc.splitTextToSize(line.value || "—", contentWidth - 170).length
-        );
-        h += Math.max(20, lineCount * 13 + 8);
+        const wrapped = doc.splitTextToSize(line.value || "—", 275);
+        h += Math.max(22, wrapped.length * 13 + 6);
       });
 
-      h += 14;
+      h += 12;
       return h;
     };
 
@@ -1093,101 +1092,78 @@ export default function Page() {
 
       setFill(colors.white);
       setDraw(colors.line);
-      doc.roundedRect(margin, y, contentWidth, cardHeight, 14, 14, "FD");
+      doc.roundedRect(margin, y, contentWidth, cardHeight, 16, 16, "FD");
 
       setFill(colors.dark);
-      doc.roundedRect(margin, y, contentWidth, 34, 14, 14, "F");
-      doc.rect(margin, y + 20, contentWidth, 14, "F");
+      doc.roundedRect(margin, y, contentWidth, 38, 16, 16, "F");
+      doc.rect(margin, y + 20, contentWidth, 18, "F");
 
-      write(`${idx + 1}. Seriennummer`, margin + 14, y + 21, {
+      write(`${idx + 1}. Seriennummer`, margin + 16, y + 24, {
         size: 10,
         bold: true,
         color: colors.white,
       });
 
-      write(r.sn, pageWidth - margin - 14, y + 21, {
+      write(r.sn, pageWidth - margin - 16, y + 24, {
         size: 11,
         bold: true,
         color: colors.white,
         align: "right",
       });
 
-      let yy = y + 52;
+      let yy = y + 58;
 
-      setFill(r.confirmed ? colors.greenBg : colors.dangerBg);
-      setDraw(r.confirmed ? colors.greenBg : colors.dangerBg);
-      doc.roundedRect(margin + 14, yy - 12, 150, 22, 8, 8, "FD");
-      write(`Scan: ${r.confirmed ? "Durchgeführt" : "Nicht durchgeführt"}`, margin + 24, yy + 3, {
+      setFill(colors.soft);
+      doc.roundedRect(margin + 16, yy - 12, 165, 24, 10, 10, "F");
+      write(`Scan: ${r.confirmed ? "Durchgeführt" : "Nicht durchgeführt"}`, margin + 28, yy + 4, {
         size: 9,
         bold: true,
-        color: r.confirmed ? colors.greenText : colors.dangerText,
+        color: r.confirmed ? colors.greenText : colors.redText,
       });
 
       const statusFinished = isRowComplete(r);
       setFill(statusFinished ? colors.greenBg : colors.soft);
-      setDraw(statusFinished ? colors.greenBg : colors.soft);
-      doc.roundedRect(pageWidth - margin - 130, yy - 12, 116, 22, 8, 8, "FD");
-      write(statusFinished ? "Status: Fertig" : "Status: Offen", pageWidth - margin - 72, yy + 3, {
+      doc.roundedRect(pageWidth - margin - 146, yy - 12, 130, 24, 10, 10, "F");
+      write(statusFinished ? "Status: Fertig" : "Status: Offen", pageWidth - margin - 81, yy + 4, {
         size: 9,
         bold: true,
         color: statusFinished ? colors.greenText : colors.muted,
         align: "center",
       });
 
-      yy += 28;
+      yy += 34;
 
       const lines = getVisibleFieldLines(r);
-      let currentSection = "";
+      const labelX = margin + 18;
+      const valueX = margin + 150;
+      const valueWidth = contentWidth - 170;
 
       lines.forEach((line) => {
-        if (!line.label && line.section !== currentSection) {
-          currentSection = line.section;
-          yy += 6;
+        if (line.isSection) {
           setFill(colors.soft);
-          setDraw(colors.soft);
-          doc.roundedRect(margin + 14, yy - 10, contentWidth - 28, 20, 8, 8, "FD");
-          write(currentSection, margin + 24, yy + 3, {
+          doc.roundedRect(margin + 12, yy - 11, contentWidth - 24, 22, 10, 10, "F");
+          write(line.label, margin + 24, yy + 4, {
             size: 9,
             bold: true,
             color: colors.orange,
           });
-          yy += 24;
+          yy += 28;
           return;
         }
 
-        if (line.isComment) {
-          setFill(colors.dangerBg);
-          setDraw(colors.dangerBg);
-          const wrapped = doc.splitTextToSize(line.value || "—", contentWidth - 80);
-          const boxHeight = Math.max(24, wrapped.length * 13 + 10);
-          doc.roundedRect(margin + 96, yy - 11, contentWidth - 110, boxHeight, 8, 8, "FD");
-          write("Kommentar:", margin + 24, yy + 2, {
-            size: 9,
-            bold: true,
-            color: colors.dangerText,
-          });
-          writeWrapped(line.value || "—", margin + 106, yy + 2, contentWidth - 130, {
-            size: 9,
-            color: colors.dangerText,
-            lineHeight: 13,
-          });
-          yy += boxHeight + 8;
-          return;
-        }
-
-        write(`${line.label}:`, margin + 24, yy, {
+        write(`${line.label}:`, labelX, yy, {
           size: 9,
           bold: true,
           color: colors.muted,
         });
 
-        const wrappedHeight = writeWrapped(line.value || "—", margin + 160, yy, contentWidth - 180, {
+        const wrappedHeight = writeWrapped(line.value || "—", valueX, yy, valueWidth, {
           size: 9,
           color: colors.text,
           lineHeight: 13,
         });
 
-        yy += Math.max(18, wrappedHeight + 2);
+        yy += Math.max(20, wrappedHeight + 2);
       });
 
       y += cardHeight + 14;
@@ -1197,74 +1173,81 @@ export default function Page() {
       const logoDataUrl = await loadImageAsDataUrl("/nextwave-logo-light.png");
 
       setFill(colors.dark);
-      doc.rect(0, 0, pageWidth, 116, "F");
+      doc.roundedRect(22, 18, pageWidth - 44, 116, 26, 26, "F");
 
-      doc.addImage(logoDataUrl, "PNG", margin, 28, 170, 34);
+      doc.addImage(logoDataUrl, "PNG", 42, 42, 168, 38);
 
-      write("NEXTWAVE Manufacturing Hub 2.0", pageWidth - margin, 42, {
-        size: 18,
+      write("NEXTWAVE Manufacturing Hub 2.0", pageWidth - 42, 60, {
+        size: 20,
         bold: true,
         color: colors.orange,
         align: "right",
       });
 
-      write("Fertigungsprotokoll", pageWidth - margin, 64, {
-        size: 13,
+      write("Fertigungsprotokoll", pageWidth - 42, 90, {
+        size: 14,
         bold: true,
         color: colors.white,
         align: "right",
       });
 
-      write("NEXTWAVE GmbH – Premium Manufacturing Documentation", pageWidth - margin, 82, {
+      write("NEXTWAVE GmbH – Premium Manufacturing Documentation", pageWidth - 42, 112, {
         size: 9,
-        color: [220, 220, 220],
+        color: [225, 225, 225],
         align: "right",
       });
 
       setFill(colors.orange);
-      doc.rect(0, 104, pageWidth, 12, "F");
+      doc.roundedRect(22, 142, pageWidth - 44, 8, 4, 4, "F");
     } catch {
       setFill(colors.dark);
-      doc.rect(0, 0, pageWidth, 116, "F");
+      doc.roundedRect(22, 18, pageWidth - 44, 116, 26, 26, "F");
 
-      write("NEXTWAVE", margin, 48, {
+      write("NEXTWAVE", 42, 68, {
         size: 24,
         bold: true,
         color: colors.white,
       });
 
-      write("Manufacturing Hub 2.0", pageWidth - margin, 42, {
-        size: 18,
+      write("NEXTWAVE Manufacturing Hub 2.0", pageWidth - 42, 60, {
+        size: 20,
         bold: true,
         color: colors.orange,
         align: "right",
       });
 
-      write("Fertigungsprotokoll", pageWidth - margin, 64, {
-        size: 13,
+      write("Fertigungsprotokoll", pageWidth - 42, 90, {
+        size: 14,
         bold: true,
         color: colors.white,
         align: "right",
       });
 
+      write("NEXTWAVE GmbH – Premium Manufacturing Documentation", pageWidth - 42, 112, {
+        size: 9,
+        color: [225, 225, 225],
+        align: "right",
+      });
+
       setFill(colors.orange);
-      doc.rect(0, 104, pageWidth, 12, "F");
+      doc.roundedRect(22, 142, pageWidth - 44, 8, 4, 4, "F");
     }
 
-    y = 140;
+    y = 170;
 
-    const leftCardHeight = drawInfoCard(margin, y, (contentWidth - 12) / 2, "Auftragsdaten", [
+    const leftH = drawInfoCard(margin, y, (contentWidth - 14) / 2, "Auftragsdaten", [
       { label: "Kunde", value: customerName || "—" },
       { label: "Shipment", value: dnInput || "—" },
       { label: "Belegnr.", value: documentNumber || "—" },
       { label: "Auftragsnr.", value: salesOrderNumber || "—" },
     ]);
 
-    const rightCardHeight = drawInfoCard(
-      margin + (contentWidth - 12) / 2 + 12,
+    const rightH = drawInfoCard(
+      margin + (contentWidth - 14) / 2 + 14,
       y,
-      (contentWidth - 12) / 2,
-      "Protokoll", [
+      (contentWidth - 14) / 2,
+      "Protokoll",
+      [
         { label: "Gerätetyp", value: deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet" },
         { label: "Bearbeiter", value: operator || "—" },
         { label: "Datum", value: nowInfo.date },
@@ -1273,31 +1256,31 @@ export default function Page() {
       ]
     );
 
-    y += Math.max(leftCardHeight, rightCardHeight) + 18;
+    y += Math.max(leftH, rightH) + 20;
 
-    if (productNames.length) {
-      ensureSpace(70);
+    if (relevantPdfProducts.length) {
       setFill(colors.soft);
       setDraw(colors.line);
-      doc.roundedRect(margin, y, contentWidth, 54, 12, 12, "FD");
-      write("Produkte", margin + 14, y + 18, {
+      doc.roundedRect(margin, y, contentWidth, 62, 14, 14, "FD");
+      write("Produkte", margin + 16, y + 20, {
         size: 10,
         bold: true,
         color: colors.orange,
       });
 
-      writeWrapped(productNames.join(" • "), margin + 14, y + 38, contentWidth - 28, {
-        size: 9,
+      writeWrapped(relevantPdfProducts.join(" • "), margin + 16, y + 42, contentWidth - 32, {
+        size: 10,
         color: colors.text,
-        lineHeight: 13,
+        lineHeight: 14,
       });
-      y += 72;
+
+      y += 78;
     }
 
     write("Fertigungseinheiten", margin, y, {
       size: 13,
       bold: true,
-      color: colors.dark,
+      color: colors.text,
     });
 
     write(`${rows.length} Gerät(e)`, pageWidth - margin, y, {
@@ -1307,51 +1290,51 @@ export default function Page() {
       align: "right",
     });
 
-    y += 18;
+    y += 16;
     setDraw(colors.line);
     doc.line(margin, y, pageWidth - margin, y);
-    y += 16;
+    y += 18;
 
     rows.forEach((r, idx) => drawUnitCard(r, idx));
 
-    ensureSpace(140);
+    ensureSpace(130);
 
     setFill(colors.soft);
     setDraw(colors.line);
-    doc.roundedRect(margin, y, contentWidth, 120, 14, 14, "FD");
+    doc.roundedRect(margin, y, contentWidth, 118, 14, 14, "FD");
 
-    write("Abschluss / Freigabe", margin + 14, y + 22, {
+    write("Abschluss / Freigabe", margin + 16, y + 22, {
       size: 11,
       bold: true,
       color: colors.orange,
     });
 
-    write(`Bearbeiter: ${operator || "—"}`, margin + 14, y + 44, {
+    write(`Bearbeiter: ${operator || "—"}`, margin + 16, y + 46, {
       size: 10,
       bold: true,
       color: colors.text,
     });
 
-    write(`Datum: ${nowInfo.date}`, margin + 14, y + 62, {
+    write(`Datum: ${nowInfo.date}`, margin + 16, y + 64, {
       size: 10,
       color: colors.text,
     });
 
-    write(`Uhrzeit: ${nowInfo.time}`, margin + 14, y + 80, {
+    write(`Uhrzeit: ${nowInfo.time}`, margin + 16, y + 82, {
       size: 10,
       color: colors.text,
     });
 
-    write(`Kürzel: ${signatureInitials || "—"}`, margin + 14, y + 98, {
+    write(`Kürzel: ${signatureInitials || "—"}`, margin + 16, y + 100, {
       size: 10,
       color: colors.text,
     });
 
     if (signatureDataUrl) {
       try {
-        doc.addImage(signatureDataUrl, "PNG", pageWidth - margin - 180, y + 20, 160, 72);
+        doc.addImage(signatureDataUrl, "PNG", pageWidth - margin - 180, y + 22, 160, 66);
       } catch {
-        // ignore signature image errors
+        // ignore
       }
     }
 
@@ -1864,15 +1847,9 @@ export default function Page() {
                       {deviceItems.length ? (
                         <div className="flex flex-wrap gap-2">
                           {deviceItems
-                            .filter(
-                              (x) =>
-                                (x.categoryName || "").trim() === "Barebone Mini-PC" ||
-                                (x.categoryName || "").trim() === "Rugged Tablet"
-                            )
+                            .filter((x) => (x.categoryName || "").trim() === relevantDeviceCategory)
                             .map((x) => (
-                              <Chip key={`${x.articleId}-${x.title}`}>
-                                {`${x.categoryName || "—"}: ${x.title}`}
-                              </Chip>
+                              <Chip key={`${x.articleId}-${x.title}`}>{x.title}</Chip>
                             ))}
                         </div>
                       ) : (
@@ -2040,7 +2017,10 @@ export default function Page() {
                       </div>
                     </div>
                   ) : (
-                    <div ref={activeUnitRef} className="rounded-2xl border border-neutral-200 p-6 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+                    <div
+                      ref={activeUnitRef}
+                      className="rounded-2xl border border-neutral-200 p-6 bg-white dark:border-neutral-800 dark:bg-neutral-900"
+                    >
                       <div className="flex items-start justify-between gap-4 flex-wrap">
                         <div>
                           <div className="text-xs text-neutral-500 dark:text-neutral-300">
@@ -2119,9 +2099,9 @@ export default function Page() {
 
                 <div className="flex flex-col gap-1">
                   <b>Produkt(e):</b>
-                  {productNames.length ? (
+                  {relevantPdfProducts.length ? (
                     <div className="flex flex-wrap gap-2">
-                      {productNames.map((p) => (
+                      {relevantPdfProducts.map((p) => (
                         <Chip key={p}>{p}</Chip>
                       ))}
                     </div>
@@ -2272,7 +2252,7 @@ export default function Page() {
                     <b>Uhrzeit:</b> {nowInfo.time}
                   </div>
                   <div>
-                    <b>Produkt(e):</b> {productNames.length ? productNames.join(" • ") : "—"}
+                    <b>Produkte:</b> {relevantPdfProducts.length ? relevantPdfProducts.join(" • ") : "—"}
                   </div>
                   <div>
                     <b>Gerätetyp:</b> {deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet"}
@@ -2319,7 +2299,7 @@ export default function Page() {
                                       <b>{f.label}:</b> {ynLabel(ynValue)}
                                     </div>
                                     {ynValue === "no" && f.requiresCommentWhenNo ? (
-                                      <div className="pl-4 text-red-700 dark:text-red-300">
+                                      <div>
                                         <b>Kommentar:</b> {commentValue || "—"}
                                       </div>
                                     ) : null}
