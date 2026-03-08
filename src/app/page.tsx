@@ -909,25 +909,32 @@ export default function Page() {
     }
   };
 
+  /** =========================
+   * Premium PDF
+   * ========================= */
+
   const createPdfDoc = async (): Promise<jsPDF> => {
     const doc = new jsPDF({ unit: "pt", format: "a4" });
 
     const pageWidth = 595.28;
     const pageHeight = 841.89;
-    const margin = 36;
+    const margin = 34;
     const contentWidth = pageWidth - margin * 2;
 
     const colors = {
       orange: [241, 81, 36] as const,
-      dark: [18, 18, 20] as const,
-      text: [30, 30, 30] as const,
-      muted: [108, 108, 108] as const,
-      line: [226, 226, 226] as const,
+      dark: [17, 18, 22] as const,
+      dark2: [30, 31, 36] as const,
+      text: [28, 28, 28] as const,
+      muted: [103, 103, 103] as const,
+      line: [227, 227, 227] as const,
       soft: [247, 247, 248] as const,
+      soft2: [242, 242, 243] as const,
       white: [255, 255, 255] as const,
-      greenBg: [240, 249, 244] as const,
-      greenText: [16, 126, 68] as const,
+      greenBg: [238, 248, 242] as const,
+      greenText: [17, 121, 64] as const,
       redText: [170, 55, 35] as const,
+      shadow: [215, 215, 215] as const,
     };
 
     let y = 0;
@@ -974,10 +981,85 @@ export default function Page() {
     };
 
     const ensureSpace = (needed: number) => {
-      if (y + needed > pageHeight - 46) {
+      if (y + needed > pageHeight - 44) {
         doc.addPage();
-        y = 42;
+        y = 40;
       }
+    };
+
+    const drawSoftShadowCard = (x: number, y: number, w: number, h: number, r = 18) => {
+      setFill(colors.shadow);
+      doc.roundedRect(x + 3, y + 3, w, h, r, r, "F");
+      setFill(colors.white);
+      setDraw(colors.line);
+      doc.roundedRect(x, y, w, h, r, r, "FD");
+    };
+
+    const drawHeader = async () => {
+      // shadow
+      setFill(colors.shadow);
+      doc.roundedRect(16, 14, pageWidth - 32, 130, 24, 24, "F");
+
+      // main card
+      setFill(colors.dark);
+      doc.roundedRect(12, 10, pageWidth - 24, 130, 24, 24, "F");
+
+      // faux gradient / glow like SaaS
+      setFill([120, 38, 16]);
+      doc.circle(70, 78, 68, "F");
+      setFill([80, 26, 12]);
+      doc.circle(120, 76, 86, "F");
+      setFill(colors.dark2);
+      doc.circle(pageWidth - 50, 76, 120, "F");
+      setFill(colors.dark);
+      doc.roundedRect(12, 10, pageWidth - 24, 130, 24, 24, "F");
+
+      try {
+        const logoDataUrl = await loadImageAsDataUrl("/nextwave-logo-light.png");
+        doc.addImage(logoDataUrl, "PNG", 28, 36, 185, 42);
+      } catch {
+        write("NEXTWAVE", 30, 68, {
+          size: 24,
+          bold: true,
+          color: colors.white,
+        });
+      }
+
+      write("NEXTWAVE Manufacturing Hub 2.0", pageWidth - 34, 56, {
+        size: 18,
+        bold: true,
+        color: colors.orange,
+        align: "right",
+      });
+
+      write("Fertigungsprotokoll", pageWidth - 34, 82, {
+        size: 13,
+        bold: true,
+        color: colors.white,
+        align: "right",
+      });
+
+      write("NEXTWAVE GmbH – Premium Manufacturing Documentation", pageWidth - 34, 106, {
+        size: 8.5,
+        color: [225, 225, 225],
+        align: "right",
+      });
+
+      setFill(colors.orange);
+      doc.roundedRect(12, 144, pageWidth - 24, 7, 3, 3, "F");
+    };
+
+    const measureInfoCardHeight = (
+      width: number,
+      rowsData: Array<{ label: string; value: string }>
+    ) => {
+      let h = 48;
+      rowsData.forEach((row) => {
+        const lines = doc.splitTextToSize(row.value || "—", width - 132);
+        h += Math.max(22, lines.length * 14);
+      });
+      h += 10;
+      return h;
     };
 
     const drawInfoCard = (
@@ -987,29 +1069,33 @@ export default function Page() {
       title: string,
       rowsData: Array<{ label: string; value: string }>
     ) => {
-      const rowHeight = 18;
-      const headHeight = 22;
-      const cardHeight = 22 + rowsData.length * rowHeight + 22;
+      const cardHeight = measureInfoCardHeight(width, rowsData);
 
       setFill(colors.soft);
       setDraw(colors.line);
-      doc.roundedRect(startX, startY, width, cardHeight, 14, 14, "FD");
+      doc.roundedRect(startX, startY, width, cardHeight, 16, 16, "FD");
 
-      write(title, startX + 16, startY + 20, { size: 10, bold: true, color: colors.orange });
+      write(title, startX + 18, startY + 22, {
+        size: 10,
+        bold: true,
+        color: colors.orange,
+      });
 
-      let yy = startY + 46;
+      let yy = startY + 52;
       rowsData.forEach((row) => {
-        write(`${row.label}:`, startX + 16, yy, {
+        write(`${row.label}:`, startX + 18, yy, {
           size: 9,
           bold: true,
           color: colors.muted,
         });
-        writeWrapped(row.value || "—", startX + 108, yy, width - 124, {
-          size: 9,
+
+        const height = writeWrapped(row.value || "—", startX + 122, yy, width - 140, {
+          size: 9.2,
           color: colors.text,
-          lineHeight: 13,
+          lineHeight: 14,
         });
-        yy += rowHeight;
+
+        yy += Math.max(22, height + 2);
       });
 
       return cardHeight;
@@ -1025,7 +1111,7 @@ export default function Page() {
 
     const getVisibleFieldLines = (r: Row) => {
       const lines: Array<{
-        section: string;
+        section?: string;
         label: string;
         value: string;
         isSection?: boolean;
@@ -1070,19 +1156,19 @@ export default function Page() {
 
     const estimateUnitHeight = (r: Row) => {
       const lines = getVisibleFieldLines(r);
-      let h = 72;
+      let h = 78; // header + status
 
       lines.forEach((line) => {
         if (line.isSection) {
-          h += 28;
+          h += 30;
           return;
         }
 
-        const wrapped = doc.splitTextToSize(line.value || "—", 275);
-        h += Math.max(22, wrapped.length * 13 + 6);
+        const wrapped = doc.splitTextToSize(line.value || "—", 250);
+        h += Math.max(22, wrapped.length * 14 + 2);
       });
 
-      h += 12;
+      h += 14;
       return h;
     };
 
@@ -1090,31 +1176,30 @@ export default function Page() {
       const cardHeight = estimateUnitHeight(r);
       ensureSpace(cardHeight);
 
-      setFill(colors.white);
-      setDraw(colors.line);
-      doc.roundedRect(margin, y, contentWidth, cardHeight, 16, 16, "FD");
+      drawSoftShadowCard(margin, y, contentWidth, cardHeight, 18);
 
+      // dark top bar
       setFill(colors.dark);
-      doc.roundedRect(margin, y, contentWidth, 38, 16, 16, "F");
-      doc.rect(margin, y + 20, contentWidth, 18, "F");
+      doc.roundedRect(margin, y, contentWidth, 40, 18, 18, "F");
+      doc.rect(margin, y + 20, contentWidth, 20, "F");
 
-      write(`${idx + 1}. Seriennummer`, margin + 16, y + 24, {
+      write(`${idx + 1}. Seriennummer`, margin + 18, y + 25, {
         size: 10,
         bold: true,
         color: colors.white,
       });
 
-      write(r.sn, pageWidth - margin - 16, y + 24, {
+      write(r.sn, pageWidth - margin - 18, y + 25, {
         size: 11,
         bold: true,
         color: colors.white,
         align: "right",
       });
 
-      let yy = y + 58;
+      let yy = y + 62;
 
-      setFill(colors.soft);
-      doc.roundedRect(margin + 16, yy - 12, 165, 24, 10, 10, "F");
+      setFill(colors.soft2);
+      doc.roundedRect(margin + 16, yy - 12, 164, 24, 10, 10, "F");
       write(`Scan: ${r.confirmed ? "Durchgeführt" : "Nicht durchgeführt"}`, margin + 28, yy + 4, {
         size: 9,
         bold: true,
@@ -1122,7 +1207,7 @@ export default function Page() {
       });
 
       const statusFinished = isRowComplete(r);
-      setFill(statusFinished ? colors.greenBg : colors.soft);
+      setFill(statusFinished ? colors.greenBg : colors.soft2);
       doc.roundedRect(pageWidth - margin - 146, yy - 12, 130, 24, 10, 10, "F");
       write(statusFinished ? "Status: Fertig" : "Status: Offen", pageWidth - margin - 81, yy + 4, {
         size: 9,
@@ -1135,19 +1220,19 @@ export default function Page() {
 
       const lines = getVisibleFieldLines(r);
       const labelX = margin + 18;
-      const valueX = margin + 150;
-      const valueWidth = contentWidth - 170;
+      const valueX = margin + 160; // extra rechts
+      const valueWidth = contentWidth - 186;
 
       lines.forEach((line) => {
         if (line.isSection) {
-          setFill(colors.soft);
-          doc.roundedRect(margin + 12, yy - 11, contentWidth - 24, 22, 10, 10, "F");
-          write(line.label, margin + 24, yy + 4, {
+          setFill(colors.soft2);
+          doc.roundedRect(margin + 14, yy - 11, contentWidth - 28, 22, 11, 11, "F");
+          write(line.label, margin + 28, yy + 4, {
             size: 9,
             bold: true,
             color: colors.orange,
           });
-          yy += 28;
+          yy += 30;
           return;
         }
 
@@ -1158,117 +1243,53 @@ export default function Page() {
         });
 
         const wrappedHeight = writeWrapped(line.value || "—", valueX, yy, valueWidth, {
-          size: 9,
+          size: 9.2,
           color: colors.text,
-          lineHeight: 13,
+          lineHeight: 14,
         });
 
-        yy += Math.max(20, wrappedHeight + 2);
+        yy += Math.max(22, wrappedHeight + 2);
       });
 
       y += cardHeight + 14;
     };
 
-    try {
-      const logoDataUrl = await loadImageAsDataUrl("/nextwave-logo-light.png");
-
-      setFill(colors.dark);
-      doc.roundedRect(22, 18, pageWidth - 44, 116, 26, 26, "F");
-
-      doc.addImage(logoDataUrl, "PNG", 42, 42, 168, 38);
-
-      write("NEXTWAVE Manufacturing Hub 2.0", pageWidth - 42, 60, {
-        size: 20,
-        bold: true,
-        color: colors.orange,
-        align: "right",
-      });
-
-      write("Fertigungsprotokoll", pageWidth - 42, 90, {
-        size: 14,
-        bold: true,
-        color: colors.white,
-        align: "right",
-      });
-
-      write("NEXTWAVE GmbH – Premium Manufacturing Documentation", pageWidth - 42, 112, {
-        size: 9,
-        color: [225, 225, 225],
-        align: "right",
-      });
-
-      setFill(colors.orange);
-      doc.roundedRect(22, 142, pageWidth - 44, 8, 4, 4, "F");
-    } catch {
-      setFill(colors.dark);
-      doc.roundedRect(22, 18, pageWidth - 44, 116, 26, 26, "F");
-
-      write("NEXTWAVE", 42, 68, {
-        size: 24,
-        bold: true,
-        color: colors.white,
-      });
-
-      write("NEXTWAVE Manufacturing Hub 2.0", pageWidth - 42, 60, {
-        size: 20,
-        bold: true,
-        color: colors.orange,
-        align: "right",
-      });
-
-      write("Fertigungsprotokoll", pageWidth - 42, 90, {
-        size: 14,
-        bold: true,
-        color: colors.white,
-        align: "right",
-      });
-
-      write("NEXTWAVE GmbH – Premium Manufacturing Documentation", pageWidth - 42, 112, {
-        size: 9,
-        color: [225, 225, 225],
-        align: "right",
-      });
-
-      setFill(colors.orange);
-      doc.roundedRect(22, 142, pageWidth - 44, 8, 4, 4, "F");
-    }
+    await drawHeader();
 
     y = 170;
 
-    const leftH = drawInfoCard(margin, y, (contentWidth - 14) / 2, "Auftragsdaten", [
+    const leftRows = [
       { label: "Kunde", value: customerName || "—" },
       { label: "Shipment", value: dnInput || "—" },
       { label: "Belegnr.", value: documentNumber || "—" },
       { label: "Auftragsnr.", value: salesOrderNumber || "—" },
-    ]);
+    ];
 
-    const rightH = drawInfoCard(
-      margin + (contentWidth - 14) / 2 + 14,
-      y,
-      (contentWidth - 14) / 2,
-      "Protokoll",
-      [
-        { label: "Gerätetyp", value: deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet" },
-        { label: "Bearbeiter", value: operator || "—" },
-        { label: "Datum", value: nowInfo.date },
-        { label: "Uhrzeit", value: nowInfo.time },
-        { label: "Shipment-ID", value: shipmentId || "—" },
-      ]
-    );
+    const rightRows = [
+      { label: "Gerätetyp", value: deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet" },
+      { label: "Bearbeiter", value: operator || "—" },
+      { label: "Datum", value: nowInfo.date },
+      { label: "Uhrzeit", value: nowInfo.time },
+      { label: "Shipment-ID", value: shipmentId || "—" },
+    ];
 
-    y += Math.max(leftH, rightH) + 20;
+    const cardWidth = (contentWidth - 14) / 2;
+    const leftH = drawInfoCard(margin, y, cardWidth, "Auftragsdaten", leftRows);
+    const rightH = drawInfoCard(margin + cardWidth + 14, y, cardWidth, "Protokoll", rightRows);
+
+    y += Math.max(leftH, rightH) + 18;
 
     if (relevantPdfProducts.length) {
       setFill(colors.soft);
       setDraw(colors.line);
-      doc.roundedRect(margin, y, contentWidth, 62, 14, 14, "FD");
-      write("Produkte", margin + 16, y + 20, {
+      doc.roundedRect(margin, y, contentWidth, 62, 16, 16, "FD");
+      write("Produkte", margin + 18, y + 22, {
         size: 10,
         bold: true,
         color: colors.orange,
       });
 
-      writeWrapped(relevantPdfProducts.join(" • "), margin + 16, y + 42, contentWidth - 32, {
+      writeWrapped(relevantPdfProducts.join(" • "), margin + 18, y + 44, contentWidth - 36, {
         size: 10,
         color: colors.text,
         lineHeight: 14,
@@ -1293,46 +1314,46 @@ export default function Page() {
     y += 16;
     setDraw(colors.line);
     doc.line(margin, y, pageWidth - margin, y);
-    y += 18;
+    y += 14; // absichtlich knapp, damit kein leerer Bereich entsteht
 
     rows.forEach((r, idx) => drawUnitCard(r, idx));
 
-    ensureSpace(130);
+    ensureSpace(126);
 
     setFill(colors.soft);
     setDraw(colors.line);
-    doc.roundedRect(margin, y, contentWidth, 118, 14, 14, "FD");
+    doc.roundedRect(margin, y, contentWidth, 118, 16, 16, "FD");
 
-    write("Abschluss / Freigabe", margin + 16, y + 22, {
+    write("Abschluss / Freigabe", margin + 18, y + 22, {
       size: 11,
       bold: true,
       color: colors.orange,
     });
 
-    write(`Bearbeiter: ${operator || "—"}`, margin + 16, y + 46, {
+    write(`Bearbeiter: ${operator || "—"}`, margin + 18, y + 48, {
       size: 10,
       bold: true,
       color: colors.text,
     });
 
-    write(`Datum: ${nowInfo.date}`, margin + 16, y + 64, {
+    write(`Datum: ${nowInfo.date}`, margin + 18, y + 66, {
       size: 10,
       color: colors.text,
     });
 
-    write(`Uhrzeit: ${nowInfo.time}`, margin + 16, y + 82, {
+    write(`Uhrzeit: ${nowInfo.time}`, margin + 18, y + 84, {
       size: 10,
       color: colors.text,
     });
 
-    write(`Kürzel: ${signatureInitials || "—"}`, margin + 16, y + 100, {
+    write(`Kürzel: ${signatureInitials || "—"}`, margin + 18, y + 102, {
       size: 10,
       color: colors.text,
     });
 
     if (signatureDataUrl) {
       try {
-        doc.addImage(signatureDataUrl, "PNG", pageWidth - margin - 180, y + 22, 160, 66);
+        doc.addImage(signatureDataUrl, "PNG", pageWidth - margin - 176, y + 24, 156, 64);
       } catch {
         // ignore
       }
@@ -1589,6 +1610,7 @@ export default function Page() {
   return (
     <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950">
       <div className="mx-auto max-w-6xl p-6 space-y-6">
+        {/* PREMIUM HEADER */}
         <div className="rounded-3xl overflow-hidden border border-neutral-200 dark:border-neutral-800">
           <div className="relative">
             <div className="absolute inset-0 bg-gradient-to-b from-neutral-950 to-neutral-900" />
@@ -1738,6 +1760,7 @@ export default function Page() {
           </div>
         </div>
 
+        {/* STEPS */}
         <Card>
           <CardBody>
             <div className="flex gap-3 overflow-auto pb-2 pt-4">
@@ -1768,6 +1791,7 @@ export default function Page() {
           </CardBody>
         </Card>
 
+        {/* DELIVERY */}
         {step === "delivery" && (
           <Card>
             <CardHeader
@@ -1831,26 +1855,11 @@ export default function Page() {
 
                     <div className="flex flex-col gap-1">
                       <b>Produkt(e):</b>
-                      {productNames.length ? (
+                      {relevantPdfProducts.length ? (
                         <div className="flex flex-wrap gap-2">
-                          {productNames.map((p) => (
+                          {relevantPdfProducts.map((p) => (
                             <Chip key={p}>{p}</Chip>
                           ))}
-                        </div>
-                      ) : (
-                        <div className="text-sm text-neutral-500 dark:text-neutral-300">—</div>
-                      )}
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      <b>Relevante Geräte (Warengruppe):</b>
-                      {deviceItems.length ? (
-                        <div className="flex flex-wrap gap-2">
-                          {deviceItems
-                            .filter((x) => (x.categoryName || "").trim() === relevantDeviceCategory)
-                            .map((x) => (
-                              <Chip key={`${x.articleId}-${x.title}`}>{x.title}</Chip>
-                            ))}
                         </div>
                       ) : (
                         <div className="text-sm text-neutral-500 dark:text-neutral-300">—</div>
@@ -1872,7 +1881,6 @@ export default function Page() {
 
                       setDocumentNumber("");
                       setSalesOrderNumber("");
-
                       setCustomerName("");
                       setExpectedSerials([]);
                       setRows([]);
@@ -1915,6 +1923,7 @@ export default function Page() {
           </Card>
         )}
 
+        {/* CHECKS */}
         {step === "checks" && (
           <Card>
             <CardHeader
@@ -2073,6 +2082,7 @@ export default function Page() {
           </Card>
         )}
 
+        {/* SUMMARY */}
         {step === "summary" && (
           <Card>
             <CardHeader
@@ -2184,6 +2194,7 @@ export default function Page() {
           </Card>
         )}
 
+        {/* PDF MODAL */}
         {showPdfPreview && (
           <div className="fixed inset-0 z-50 bg-black/70 px-4 py-6" onClick={() => setShowPdfPreview(false)}>
             <div
