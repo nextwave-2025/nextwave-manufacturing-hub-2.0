@@ -2,7 +2,18 @@
 
 import Image from "next/image";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Check, AlertTriangle, Search, ArrowLeft, ArrowRight, Eye, EyeOff, Download, Loader2, UploadCloud } from "lucide-react";
+import {
+  Check,
+  AlertTriangle,
+  Search,
+  ArrowLeft,
+  ArrowRight,
+  Eye,
+  EyeOff,
+  Download,
+  Loader2,
+  UploadCloud,
+} from "lucide-react";
 import jsPDF from "jspdf";
 
 // ✅ Relativer Import, damit kein @/ Alias nötig ist
@@ -12,35 +23,24 @@ import { loadLayouts } from "../lib/layoutConfig";
  * Types (tolerant & robust)
  * ========================= */
 
-// Yn value used in UI
 type Yn = "unset" | "yes" | "no";
-
-// device type
 type DeviceType = "mini" | "rugged";
 
-// showWhen structure (optional)
 type ShowWhen =
   | { key: string; eqYn: Yn }
   | { key: string; eqBool: boolean };
 
-// field types supported
 type FieldType = "yn" | "boolean" | "text";
 
-// field definition (tolerant: admin may add properties)
 type FieldDef = {
   key: string;
   label: string;
   type: FieldType;
   required?: boolean;
-
-  // optional: conditional visibility
   showWhen?: ShowWhen;
-
-  // optional helpers (if you later extend)
   requiresCommentWhenNo?: boolean;
 };
 
-// sections config
 type SectionDef = {
   title: string;
   fields: FieldDef[];
@@ -53,31 +53,24 @@ type LayoutConfig = {
 };
 
 type Layouts = Record<DeviceType, LayoutConfig>;
-
 type Step = "delivery" | "checks" | "summary";
 
-// ✅ Row: fixed core fields + dynamic custom fields
 type Row = {
   sn: string;
   confirmed: boolean;
 
-  // shared
   visual: Yn;
   visualComment: string;
   shake: Yn;
 
-  // Mini relevant
   osInstalled: Yn;
   ssdDetected: Yn;
 
-  // Rugged relevant
   iotInstalled: Yn;
 
-  // allow custom fields (added via admin)
   [key: string]: any;
 };
 
-// ✅ Weclapp API response types (tolerant)
 type WeclappDeviceItem = {
   articleId: string;
   title: string;
@@ -102,10 +95,7 @@ type WeclappDeliveryNoteResponse = {
   deviceItems?: WeclappDeviceItem[];
   deviceSerials?: string[];
 
-  // tolerant: your API returns raw shipment sometimes
   raw?: any;
-
-  // tolerant: some versions may return shipmentId directly
   shipmentId?: string;
 };
 
@@ -124,16 +114,13 @@ function emptyRow(sn: string): Row {
     sn,
     confirmed: false,
 
-    // shared
     visual: "unset",
     visualComment: "",
     shake: "unset",
 
-    // mini core
     osInstalled: "unset",
     ssdDetected: "unset",
 
-    // rugged core
     iotInstalled: "unset",
   };
 }
@@ -156,13 +143,20 @@ function getBoolValue(v: any) {
   return v === true;
 }
 
-/**
- * ✅ Central visibility logic:
- * 1) if field has showWhen -> apply it
- * 2) else apply known production rules (compat to your workflow)
- */
+async function loadImageAsDataUrl(src: string): Promise<string> {
+  const res = await fetch(src, { cache: "force-cache" });
+  if (!res.ok) throw new Error(`Bild konnte nicht geladen werden: ${src}`);
+  const blob = await res.blob();
+
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result || ""));
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 function shouldShowField(row: Row, f: FieldDef): boolean {
-  // (1) showWhen from admin
   if (f.showWhen && typeof f.showWhen === "object" && "key" in f.showWhen) {
     const cond = f.showWhen as any;
     const val: any = (row as any)[cond.key];
@@ -170,16 +164,12 @@ function shouldShowField(row: Row, f: FieldDef): boolean {
     if ("eqBool" in cond) return Boolean(val) === cond.eqBool;
   }
 
-  // (2) fallback production rules (classic)
-  // - ssdDetected only when osInstalled=no
   if (f.key === "ssdDetected") return row.osInstalled === "no";
 
-  // - OS checks only when osInstalled=yes
   if (["driversOk", "updatesDone", "powerPlanSet", "windowsActivated"].includes(f.key)) {
     return row.osInstalled === "yes";
   }
 
-  // - Rugged IoT sub-checks only when iotInstalled=yes
   if (["cameraAppInstalled", "controlCenterInstalled"].includes(f.key)) {
     return row.iotInstalled === "yes";
   }
@@ -188,7 +178,7 @@ function shouldShowField(row: Row, f: FieldDef): boolean {
 }
 
 function isFieldComplete(row: Row, f: FieldDef): boolean {
-  if (!shouldShowField(row, f)) return true; // hidden fields don't block
+  if (!shouldShowField(row, f)) return true;
 
   const v: any = (row as any)[f.key];
 
@@ -204,11 +194,10 @@ function isFieldComplete(row: Row, f: FieldDef): boolean {
   }
 
   if (f.type === "boolean") {
-    if (!f.required) return true; // optional boolean can stay false
+    if (!f.required) return true;
     return v === true;
   }
 
-  // text
   if (!f.required) return true;
   return String(v ?? "").trim().length > 0;
 }
@@ -217,14 +206,25 @@ function isFieldComplete(row: Row, f: FieldDef): boolean {
  * UI components
  * ========================= */
 
-function Chip({ children, tone = "muted" }: { children: React.ReactNode; tone?: "muted" | "blue" | "green" }) {
+function Chip({
+  children,
+  tone = "muted",
+}: {
+  children: React.ReactNode;
+  tone?: "muted" | "blue" | "green";
+}) {
   const cls =
     tone === "green"
       ? "bg-green-500/10 text-green-700 border-green-500/20 dark:text-green-200"
       : tone === "blue"
       ? "bg-blue-500/10 text-blue-700 border-blue-500/20 dark:text-green-200"
       : "bg-neutral-500/10 text-neutral-700 border-neutral-500/20 dark:text-neutral-200";
-  return <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${cls}`}>{children}</span>;
+
+  return (
+    <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${cls}`}>
+      {children}
+    </span>
+  );
 }
 
 function Btn({
@@ -236,13 +236,14 @@ function Btn({
   children: React.ReactNode;
   variant?: "primary" | "outline";
   disabled?: boolean;
-  onClick?: () => void;
+  onClick?: () => void | Promise<void>;
 }) {
   const base = "inline-flex items-center justify-center rounded-2xl px-4 h-11 text-sm font-semibold transition";
   const v =
     variant === "primary"
       ? "text-white shadow-[0_10px_30px_rgba(0,0,0,0.10)]"
       : "bg-transparent border border-[#f15124] text-[#f15124] hover:bg-[#f15124]/10";
+
   return (
     <button
       type="button"
@@ -291,7 +292,15 @@ function SelectYN({ value, onChange }: { value: Yn; onChange: (v: Yn) => void })
   );
 }
 
-function CheckToggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+function CheckToggle({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
   return (
     <button
       type="button"
@@ -316,9 +325,6 @@ function CheckToggle({ label, checked, onChange }: { label: string; checked: boo
   );
 }
 
-/**
- * ✅ SignaturePad (stable)
- */
 function SignaturePad({
   value,
   onChange,
@@ -411,7 +417,6 @@ function SignaturePad({
     const onResize = () => setupCanvas();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dark]);
 
   useEffect(() => {
@@ -429,7 +434,6 @@ function SignaturePad({
       ctx.drawImage(img, 0, 0, rect.width, rect.height);
     };
     img.src = value;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
   return (
@@ -457,7 +461,9 @@ function SignaturePad({
         </div>
       </div>
 
-      <div className="text-xs text-neutral-500 dark:text-neutral-300">Tipp: Am Tablet im Querformat unterschreiben.</div>
+      <div className="text-xs text-neutral-500 dark:text-neutral-300">
+        Tipp: Am Tablet im Querformat unterschreiben.
+      </div>
     </div>
   );
 }
@@ -473,18 +479,14 @@ export default function Page() {
     { key: "summary", label: "Zusammenfassung" },
   ];
 
-  // ✅ localStorage keys (MÜSSEN vor useEffect stehen)
   const LS_USER_STATE = "nextwave_user_state_v1";
   const LS_USER_OPERATOR = "nextwave_user_operator_v1";
 
-  // ✅ layouts from lib (admin saves into LocalStorage, loadLayouts reads it)
   const [layouts, setLayouts] = useState<Layouts>(() => loadLayouts() as any);
 
-  // ✅ State: MUSS vor useEffects stehen, die es benutzen
   const [step, setStep] = useState<Step>("delivery");
   const [deviceType, setDeviceType] = useState<DeviceType>("mini");
 
-  // login gate
   const [operator, setOperator] = useState<string>("");
   const USERS: { name: string; email: string; password: string }[] = [
     { name: "Mustafa Ergin", email: "mustafa@next-wave.tech", password: "NEXTWAVE123" },
@@ -496,8 +498,7 @@ export default function Page() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
 
-  // delivery / workflow state
-  const [dnInput, setDnInput] = useState(""); // ✅ real
+  const [dnInput, setDnInput] = useState("");
   const [dnLoaded, setDnLoaded] = useState(false);
 
   const [documentNumber, setDocumentNumber] = useState<string>("");
@@ -507,7 +508,6 @@ export default function Page() {
   const [productNames, setProductNames] = useState<string[]>([]);
   const [deviceItems, setDeviceItems] = useState<WeclappDeviceItem[]>([]);
 
-  // ✅ IMPORTANT: we store shipmentId for upload
   const [shipmentId, setShipmentId] = useState<string>("");
 
   const [dnLoading, setDnLoading] = useState(false);
@@ -521,15 +521,12 @@ export default function Page() {
   const [scanError, setScanError] = useState<string | null>(null);
   const [autoAdvance, setAutoAdvance] = useState(false);
 
-  // UI
   const [dark, setDark] = useState(false);
 
-  // summary / pdf
   const [signatureInitials, setSignatureInitials] = useState<string>("");
   const [signatureDataUrl, setSignatureDataUrl] = useState<string>("");
   const [showPdfPreview, setShowPdfPreview] = useState(false);
 
-  // upload state
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadOkMsg, setUploadOkMsg] = useState<string | null>(null);
@@ -540,9 +537,7 @@ export default function Page() {
     return () => window.removeEventListener("focus", onFocus);
   }, []);
 
-  // ✅ Restore UI + Session after reload (keine Abmeldung durch Reload)
   useEffect(() => {
-    // 1) State restore (Arbeitsstand)
     try {
       const raw = localStorage.getItem(LS_USER_STATE);
       if (raw) {
@@ -580,7 +575,6 @@ export default function Page() {
       // ignore
     }
 
-    // 2) Session restore (Cookie prüfen)
     (async () => {
       try {
         const r = await fetch("/api/auth/session", { method: "GET", cache: "no-store" });
@@ -588,8 +582,6 @@ export default function Page() {
 
         if (j?.ok) {
           setIsAuthed(true);
-
-          // Operator-Name aus localStorage wiederherstellen
           const op = localStorage.getItem(LS_USER_OPERATOR) || "";
           if (op) setOperator(op);
         }
@@ -597,10 +589,8 @@ export default function Page() {
         // ignore
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ Persist Arbeitsstand automatisch (nur Reset darf löschen)
   useEffect(() => {
     const t = window.setTimeout(() => {
       try {
@@ -662,7 +652,22 @@ export default function Page() {
     showPdfPreview,
   ]);
 
-  const todayStr = useMemo(() => new Date().toLocaleDateString("de-DE"), []);
+  const nowInfo = useMemo(() => {
+    const now = new Date();
+
+    const date = now.toLocaleDateString("de-DE", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+
+    const time = now.toLocaleTimeString("de-DE", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    return { date, time };
+  }, []);
 
   const scanFocusRef = useRef<HTMLInputElement | null>(null);
   const activeUnitRef = useRef<HTMLDivElement | null>(null);
@@ -677,7 +682,6 @@ export default function Page() {
   const activeRow = activeIdx >= 0 ? rows[activeIdx] : undefined;
   const totalExpected = expectedSerials.length;
 
-  // ✅ dynamic fields from selected device layout
   const deviceSections: SectionDef[] = useMemo(() => {
     const cfg = (layouts as any)?.[deviceType] as LayoutConfig | undefined;
     return cfg?.sections?.length ? (cfg.sections as any) : [];
@@ -758,7 +762,6 @@ export default function Page() {
   }, [step]);
 
   const resetAll = () => {
-    // ✅ gespeicherten Arbeitsstand wirklich löschen
     try {
       localStorage.removeItem("nextwave_user_state_v1");
       localStorage.removeItem("nextwave_user_operator_v1");
@@ -810,7 +813,6 @@ export default function Page() {
     }
 
     try {
-      // ✅ Serverseitig Cookie setzen
       const r = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -837,7 +839,6 @@ export default function Page() {
     setRows((prev) => prev.map((x, i) => (i === activeIdx ? { ...x, [key]: value } : x)));
   };
 
-  // ✅ REAL: Shipment aus Weclapp holen
   const loadDeliveryFromWeclapp = async () => {
     const input = (dnInput || "").trim();
     if (!input) return;
@@ -866,15 +867,15 @@ export default function Page() {
       const items = Array.isArray(j.deviceItems) ? j.deviceItems : [];
       const sns = Array.isArray(j.deviceSerials) ? j.deviceSerials : [];
 
-      // ✅ shipmentId zuverlässig aus response holen (raw.id ODER shipmentId)
       const sid =
-        (typeof (j as any)?.shipmentId === "string" && (j as any).shipmentId.trim()) ? (j as any).shipmentId.trim()
-        : (typeof (j as any)?.raw?.id === "string" && (j as any).raw.id.trim()) ? (j as any).raw.id.trim()
-        : "";
+        typeof (j as any)?.shipmentId === "string" && (j as any).shipmentId.trim()
+          ? (j as any).shipmentId.trim()
+          : typeof (j as any)?.raw?.id === "string" && (j as any).raw.id.trim()
+          ? (j as any).raw.id.trim()
+          : "";
 
       setShipmentId(sid);
 
-      // Gerätetyp aus Warengruppe ableiten (stabil, unabhängig vom Produktnamen)
       const hasRugged = items.some((x) => (x.categoryName || "").trim() === "Rugged Tablet");
       const inferred: DeviceType = hasRugged ? "rugged" : "mini";
       setDeviceType(inferred);
@@ -899,9 +900,8 @@ export default function Page() {
       setSignatureInitials("");
       setSignatureDataUrl("");
 
-      // refresh layouts in case admin changed them
       setLayouts(loadLayouts() as any);
-    } catch (e: any) {
+    } catch {
       setDnError("Weclapp-Request fehlgeschlagen (Netzwerk/JSON).");
       setDnLoaded(false);
     } finally {
@@ -909,219 +909,466 @@ export default function Page() {
     }
   };
 
-  // ✅ create a PDF Blob (for upload + download)
-  const buildPdfBlob = (): Blob => {
+  const createPdfDoc = async (): Promise<jsPDF> => {
     const doc = new jsPDF({ unit: "pt", format: "a4" });
 
+    const pageWidth = 595.28;
+    const pageHeight = 841.89;
     const margin = 40;
-    let y = 50;
+    const contentWidth = pageWidth - margin * 2;
 
-    const writeLine = (text: string, fontSize = 11, gap = 16) => {
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(fontSize);
-      const lines = doc.splitTextToSize(text, 515);
-      doc.text(lines, margin, y);
-      y += lines.length * gap;
-      if (y > 770) {
+    const colors = {
+      orange: [241, 81, 36] as const,
+      dark: [22, 22, 24] as const,
+      text: [30, 30, 30] as const,
+      muted: [110, 110, 110] as const,
+      line: [225, 225, 225] as const,
+      soft: [247, 247, 248] as const,
+      white: [255, 255, 255] as const,
+      dangerBg: [255, 245, 243] as const,
+      dangerText: [184, 58, 32] as const,
+      greenBg: [241, 252, 245] as const,
+      greenText: [18, 120, 63] as const,
+    };
+
+    let y = 0;
+
+    const setText = (rgb: readonly number[]) => doc.setTextColor(rgb[0], rgb[1], rgb[2]);
+    const setFill = (rgb: readonly number[]) => doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+    const setDraw = (rgb: readonly number[]) => doc.setDrawColor(rgb[0], rgb[1], rgb[2]);
+
+    const ensureSpace = (needed: number) => {
+      if (y + needed > pageHeight - 50) {
         doc.addPage();
-        y = 50;
+        y = 40;
       }
     };
 
-    const renderFieldToPdf = (r: Row, f: FieldDef) => {
-      if (!shouldShowField(r, f)) return;
+    const write = (
+      text: string,
+      x: number,
+      yPos: number,
+      options?: { size?: number; bold?: boolean; color?: readonly number[]; align?: "left" | "right" | "center" }
+    ) => {
+      doc.setFont("helvetica", options?.bold ? "bold" : "normal");
+      doc.setFontSize(options?.size ?? 10);
+      setText(options?.color ?? colors.text);
+      doc.text(text, x, yPos, options?.align ? { align: options.align } : undefined);
+    };
 
+    const writeWrapped = (
+      text: string,
+      x: number,
+      yPos: number,
+      maxWidth: number,
+      options?: { size?: number; bold?: boolean; color?: readonly number[]; lineHeight?: number }
+    ) => {
+      doc.setFont("helvetica", options?.bold ? "bold" : "normal");
+      doc.setFontSize(options?.size ?? 10);
+      setText(options?.color ?? colors.text);
+      const lines = doc.splitTextToSize(text || "—", maxWidth);
+      doc.text(lines, x, yPos);
+      return lines.length * (options?.lineHeight ?? 14);
+    };
+
+    const drawInfoCard = (
+      startX: number,
+      startY: number,
+      width: number,
+      title: string,
+      rowsData: Array<{ label: string; value: string }>
+    ) => {
+      const rowHeight = 18;
+      const headerHeight = 24;
+      const padding = 12;
+      const cardHeight = headerHeight + padding + rowsData.length * rowHeight + 8;
+
+      setFill(colors.soft);
+      setDraw(colors.line);
+      doc.roundedRect(startX, startY, width, cardHeight, 12, 12, "FD");
+
+      write(title, startX + 12, startY + 16, { size: 10, bold: true, color: colors.orange });
+
+      let yy = startY + 38;
+      rowsData.forEach((row) => {
+        write(`${row.label}:`, startX + 12, yy, { size: 9, bold: true, color: colors.muted });
+        writeWrapped(row.value || "—", startX + 92, yy, width - 104, { size: 9, color: colors.text, lineHeight: 13 });
+        yy += rowHeight;
+      });
+
+      return cardHeight;
+    };
+
+    const getFieldValueLabel = (r: Row, f: FieldDef) => {
       const v: any = (r as any)[f.key];
 
       if (f.type === "yn") {
-        const ynValue = (v as Yn) ?? "unset";
-        const commentKey = getNoCommentKey(f.key);
-        const commentValue = String((r as any)[commentKey] ?? "").trim();
-
-        writeLine(
-          `${f.label}: ${ynLabel(ynValue)}${
-            ynValue === "no" && f.requiresCommentWhenNo ? ` (Kommentar: ${commentValue || "—"})` : ""
-          }`
-        );
-        return;
+        return ynLabel((v as Yn) ?? "unset");
       }
 
       if (f.type === "boolean") {
-        writeLine(`${f.label}: ${boolLabel(getBoolValue(v))}`);
-        return;
+        return boolLabel(getBoolValue(v));
       }
 
-      writeLine(`${f.label}: ${String(v ?? "").trim() || "—"}`);
+      return String(v ?? "").trim() || "—";
     };
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.text("NEXTWAVE – Fertigungsprotokoll", margin, y);
-    y += 22;
+    const getVisibleFieldLines = (r: Row) => {
+      const lines: Array<{
+        section: string;
+        label: string;
+        value: string;
+        isComment?: boolean;
+        comment?: string;
+      }> = [];
 
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(11);
-    writeLine(`Kunde: ${customerName || "—"}`);
-    writeLine(`Eingabe (Shipment): ${dnInput || "—"}`);
-    writeLine(`Belegnummer: ${documentNumber || "—"}`);
-    writeLine(`Auftragsnummer: ${salesOrderNumber || "—"}`);
-    writeLine(`Gerätetyp: ${deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet"}`);
-    writeLine(`Bearbeiter: ${operator || "—"}`);
-    writeLine(`Datum: ${todayStr}`);
-    y += 8;
+      deviceSections.forEach((sec) => {
+        let sectionAdded = false;
 
-    doc.setDrawColor(220);
-    doc.line(margin, y, 555, y);
+        (sec.fields || []).forEach((f) => {
+          if (!shouldShowField(r, f)) return;
+
+          if (!sectionAdded) {
+            lines.push({
+              section: sec.title,
+              label: "",
+              value: "",
+            });
+            sectionAdded = true;
+          }
+
+          lines.push({
+            section: sec.title,
+            label: f.label,
+            value: getFieldValueLabel(r, f),
+          });
+
+          if (f.type === "yn" && f.requiresCommentWhenNo) {
+            const val = (r as any)[f.key] as Yn;
+            const commentKey = getNoCommentKey(f.key);
+            const comment = String((r as any)[commentKey] ?? "").trim();
+
+            if (val === "no") {
+              lines.push({
+                section: sec.title,
+                label: "Kommentar",
+                value: comment || "—",
+                isComment: true,
+                comment,
+              });
+            }
+          }
+        });
+      });
+
+      return lines;
+    };
+
+    const estimateUnitHeight = (r: Row) => {
+      const lines = getVisibleFieldLines(r);
+      let h = 56;
+
+      let lastSection = "";
+      lines.forEach((line) => {
+        if (!line.label && line.section !== lastSection) {
+          h += 26;
+          lastSection = line.section;
+          return;
+        }
+
+        const lineCount = Math.max(
+          1,
+          doc.splitTextToSize(line.value || "—", contentWidth - 170).length
+        );
+        h += Math.max(20, lineCount * 13 + 8);
+      });
+
+      h += 14;
+      return h;
+    };
+
+    const drawUnitCard = (r: Row, idx: number) => {
+      const cardHeight = estimateUnitHeight(r);
+      ensureSpace(cardHeight);
+
+      setFill(colors.white);
+      setDraw(colors.line);
+      doc.roundedRect(margin, y, contentWidth, cardHeight, 14, 14, "FD");
+
+      setFill(colors.dark);
+      doc.roundedRect(margin, y, contentWidth, 34, 14, 14, "F");
+      doc.rect(margin, y + 20, contentWidth, 14, "F");
+
+      write(`${idx + 1}. Seriennummer`, margin + 14, y + 21, {
+        size: 10,
+        bold: true,
+        color: colors.white,
+      });
+
+      write(r.sn, pageWidth - margin - 14, y + 21, {
+        size: 11,
+        bold: true,
+        color: colors.white,
+        align: "right",
+      });
+
+      let yy = y + 52;
+
+      setFill(r.confirmed ? colors.greenBg : colors.dangerBg);
+      setDraw(r.confirmed ? colors.greenBg : colors.dangerBg);
+      doc.roundedRect(margin + 14, yy - 12, 150, 22, 8, 8, "FD");
+      write(`Scan: ${r.confirmed ? "Durchgeführt" : "Nicht durchgeführt"}`, margin + 24, yy + 3, {
+        size: 9,
+        bold: true,
+        color: r.confirmed ? colors.greenText : colors.dangerText,
+      });
+
+      const statusFinished = isRowComplete(r);
+      setFill(statusFinished ? colors.greenBg : colors.soft);
+      setDraw(statusFinished ? colors.greenBg : colors.soft);
+      doc.roundedRect(pageWidth - margin - 130, yy - 12, 116, 22, 8, 8, "FD");
+      write(statusFinished ? "Status: Fertig" : "Status: Offen", pageWidth - margin - 72, yy + 3, {
+        size: 9,
+        bold: true,
+        color: statusFinished ? colors.greenText : colors.muted,
+        align: "center",
+      });
+
+      yy += 28;
+
+      const lines = getVisibleFieldLines(r);
+      let currentSection = "";
+
+      lines.forEach((line) => {
+        if (!line.label && line.section !== currentSection) {
+          currentSection = line.section;
+          yy += 6;
+          setFill(colors.soft);
+          setDraw(colors.soft);
+          doc.roundedRect(margin + 14, yy - 10, contentWidth - 28, 20, 8, 8, "FD");
+          write(currentSection, margin + 24, yy + 3, {
+            size: 9,
+            bold: true,
+            color: colors.orange,
+          });
+          yy += 24;
+          return;
+        }
+
+        if (line.isComment) {
+          setFill(colors.dangerBg);
+          setDraw(colors.dangerBg);
+          const wrapped = doc.splitTextToSize(line.value || "—", contentWidth - 80);
+          const boxHeight = Math.max(24, wrapped.length * 13 + 10);
+          doc.roundedRect(margin + 96, yy - 11, contentWidth - 110, boxHeight, 8, 8, "FD");
+          write("Kommentar:", margin + 24, yy + 2, {
+            size: 9,
+            bold: true,
+            color: colors.dangerText,
+          });
+          writeWrapped(line.value || "—", margin + 106, yy + 2, contentWidth - 130, {
+            size: 9,
+            color: colors.dangerText,
+            lineHeight: 13,
+          });
+          yy += boxHeight + 8;
+          return;
+        }
+
+        write(`${line.label}:`, margin + 24, yy, {
+          size: 9,
+          bold: true,
+          color: colors.muted,
+        });
+
+        const wrappedHeight = writeWrapped(line.value || "—", margin + 160, yy, contentWidth - 180, {
+          size: 9,
+          color: colors.text,
+          lineHeight: 13,
+        });
+
+        yy += Math.max(18, wrappedHeight + 2);
+      });
+
+      y += cardHeight + 14;
+    };
+
+    try {
+      const logoDataUrl = await loadImageAsDataUrl("/nextwave-logo-light.png");
+
+      setFill(colors.dark);
+      doc.rect(0, 0, pageWidth, 116, "F");
+
+      doc.addImage(logoDataUrl, "PNG", margin, 28, 170, 34);
+
+      write("NEXTWAVE Manufacturing Hub 2.0", pageWidth - margin, 42, {
+        size: 18,
+        bold: true,
+        color: colors.orange,
+        align: "right",
+      });
+
+      write("Fertigungsprotokoll", pageWidth - margin, 64, {
+        size: 13,
+        bold: true,
+        color: colors.white,
+        align: "right",
+      });
+
+      write("NEXTWAVE GmbH – Premium Manufacturing Documentation", pageWidth - margin, 82, {
+        size: 9,
+        color: [220, 220, 220],
+        align: "right",
+      });
+
+      setFill(colors.orange);
+      doc.rect(0, 104, pageWidth, 12, "F");
+    } catch {
+      setFill(colors.dark);
+      doc.rect(0, 0, pageWidth, 116, "F");
+
+      write("NEXTWAVE", margin, 48, {
+        size: 24,
+        bold: true,
+        color: colors.white,
+      });
+
+      write("Manufacturing Hub 2.0", pageWidth - margin, 42, {
+        size: 18,
+        bold: true,
+        color: colors.orange,
+        align: "right",
+      });
+
+      write("Fertigungsprotokoll", pageWidth - margin, 64, {
+        size: 13,
+        bold: true,
+        color: colors.white,
+        align: "right",
+      });
+
+      setFill(colors.orange);
+      doc.rect(0, 104, pageWidth, 12, "F");
+    }
+
+    y = 140;
+
+    const leftCardHeight = drawInfoCard(margin, y, (contentWidth - 12) / 2, "Auftragsdaten", [
+      { label: "Kunde", value: customerName || "—" },
+      { label: "Shipment", value: dnInput || "—" },
+      { label: "Belegnr.", value: documentNumber || "—" },
+      { label: "Auftragsnr.", value: salesOrderNumber || "—" },
+    ]);
+
+    const rightCardHeight = drawInfoCard(
+      margin + (contentWidth - 12) / 2 + 12,
+      y,
+      (contentWidth - 12) / 2,
+      "Protokoll", [
+        { label: "Gerätetyp", value: deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet" },
+        { label: "Bearbeiter", value: operator || "—" },
+        { label: "Datum", value: nowInfo.date },
+        { label: "Uhrzeit", value: nowInfo.time },
+        { label: "Shipment-ID", value: shipmentId || "—" },
+      ]
+    );
+
+    y += Math.max(leftCardHeight, rightCardHeight) + 18;
+
+    if (productNames.length) {
+      ensureSpace(70);
+      setFill(colors.soft);
+      setDraw(colors.line);
+      doc.roundedRect(margin, y, contentWidth, 54, 12, 12, "FD");
+      write("Produkte", margin + 14, y + 18, {
+        size: 10,
+        bold: true,
+        color: colors.orange,
+      });
+
+      writeWrapped(productNames.join(" • "), margin + 14, y + 38, contentWidth - 28, {
+        size: 9,
+        color: colors.text,
+        lineHeight: 13,
+      });
+      y += 72;
+    }
+
+    write("Fertigungseinheiten", margin, y, {
+      size: 13,
+      bold: true,
+      color: colors.dark,
+    });
+
+    write(`${rows.length} Gerät(e)`, pageWidth - margin, y, {
+      size: 10,
+      bold: true,
+      color: colors.muted,
+      align: "right",
+    });
+
     y += 18;
+    setDraw(colors.line);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 16;
 
-    doc.setFont("helvetica", "bold");
-    doc.text("Einheiten", margin, y);
-    y += 18;
+    rows.forEach((r, idx) => drawUnitCard(r, idx));
 
-    rows.forEach((r, idx) => {
-      doc.setFont("helvetica", "bold");
-      doc.text(`${idx + 1}. ${r.sn}`, margin, y);
-      y += 14;
+    ensureSpace(140);
 
-      doc.setFont("helvetica", "normal");
-      writeLine(`Scan: ${r.confirmed ? "Durchgeführt" : "Nicht durchgeführt"}`);
+    setFill(colors.soft);
+    setDraw(colors.line);
+    doc.roundedRect(margin, y, contentWidth, 120, 14, 14, "FD");
 
-      deviceFields.forEach((f) => renderFieldToPdf(r, f));
+    write("Abschluss / Freigabe", margin + 14, y + 22, {
+      size: 11,
+      bold: true,
+      color: colors.orange,
+    });
 
-      y += 8;
-      doc.setDrawColor(235);
-      doc.line(margin, y, 555, y);
-      y += 16;
+    write(`Bearbeiter: ${operator || "—"}`, margin + 14, y + 44, {
+      size: 10,
+      bold: true,
+      color: colors.text,
+    });
+
+    write(`Datum: ${nowInfo.date}`, margin + 14, y + 62, {
+      size: 10,
+      color: colors.text,
+    });
+
+    write(`Uhrzeit: ${nowInfo.time}`, margin + 14, y + 80, {
+      size: 10,
+      color: colors.text,
+    });
+
+    write(`Kürzel: ${signatureInitials || "—"}`, margin + 14, y + 98, {
+      size: 10,
+      color: colors.text,
     });
 
     if (signatureDataUrl) {
       try {
-        if (y > 680) {
-          doc.addPage();
-          y = 50;
-        }
-        doc.setFont("helvetica", "bold");
-        doc.text("Unterschrift", margin, y);
-        y += 12;
-
-        doc.addImage(signatureDataUrl, "PNG", margin, y, 250, 90);
-        y += 110;
+        doc.addImage(signatureDataUrl, "PNG", pageWidth - margin - 180, y + 20, 160, 72);
       } catch {
-        // ignore
+        // ignore signature image errors
       }
     }
 
-    const blob = doc.output("blob");
-    return blob;
+    return doc;
   };
 
-  const downloadPdf = () => {
-    const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const buildPdfBlob = async (): Promise<Blob> => {
+    const doc = await createPdfDoc();
+    return doc.output("blob");
+  };
 
-    const margin = 40;
-    let y = 50;
-
-    const writeLine = (text: string, fontSize = 11, gap = 16) => {
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(fontSize);
-      const lines = doc.splitTextToSize(text, 515);
-      doc.text(lines, margin, y);
-      y += lines.length * gap;
-      if (y > 770) {
-        doc.addPage();
-        y = 50;
-      }
-    };
-
-    const renderFieldToPdf = (r: Row, f: FieldDef) => {
-      if (!shouldShowField(r, f)) return;
-
-      const v: any = (r as any)[f.key];
-
-      if (f.type === "yn") {
-        const ynValue = (v as Yn) ?? "unset";
-        const commentKey = getNoCommentKey(f.key);
-        const commentValue = String((r as any)[commentKey] ?? "").trim();
-
-        writeLine(
-          `${f.label}: ${ynLabel(ynValue)}${
-            ynValue === "no" && f.requiresCommentWhenNo ? ` (Kommentar: ${commentValue || "—"})` : ""
-          }`
-        );
-        return;
-      }
-
-      if (f.type === "boolean") {
-        writeLine(`${f.label}: ${boolLabel(getBoolValue(v))}`);
-        return;
-      }
-
-      writeLine(`${f.label}: ${String(v ?? "").trim() || "—"}`);
-    };
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.text("NEXTWAVE – Fertigungsprotokoll", margin, y);
-    y += 22;
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(11);
-    writeLine(`Kunde: ${customerName || "—"}`);
-    writeLine(`Eingabe (Shipment): ${dnInput || "—"}`);
-    writeLine(`Belegnummer: ${documentNumber || "—"}`);
-    writeLine(`Auftragsnummer: ${salesOrderNumber || "—"}`);
-    writeLine(`Gerätetyp: ${deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet"}`);
-    writeLine(`Bearbeiter: ${operator || "—"}`);
-    writeLine(`Datum: ${todayStr}`);
-    y += 8;
-
-    doc.setDrawColor(220);
-    doc.line(margin, y, 555, y);
-    y += 18;
-
-    doc.setFont("helvetica", "bold");
-    doc.text("Einheiten", margin, y);
-    y += 18;
-
-    rows.forEach((r, idx) => {
-      doc.setFont("helvetica", "bold");
-      doc.text(`${idx + 1}. ${r.sn}`, margin, y);
-      y += 14;
-
-      doc.setFont("helvetica", "normal");
-      writeLine(`Scan: ${r.confirmed ? "Durchgeführt" : "Nicht durchgeführt"}`);
-
-      deviceFields.forEach((f) => renderFieldToPdf(r, f));
-
-      y += 8;
-      doc.setDrawColor(235);
-      doc.line(margin, y, 555, y);
-      y += 16;
-    });
-
-    if (signatureDataUrl) {
-      try {
-        if (y > 680) {
-          doc.addPage();
-          y = 50;
-        }
-        doc.setFont("helvetica", "bold");
-        doc.text("Unterschrift", margin, y);
-        y += 12;
-
-        doc.addImage(signatureDataUrl, "PNG", margin, y, 250, 90);
-        y += 110;
-      } catch {
-        // ignore
-      }
-    }
-
+  const downloadPdf = async () => {
+    const doc = await createPdfDoc();
     const safeDn = (dnInput || "DOC").replace(/[^\w\-]+/g, "_");
     doc.save(`NEXTWAVE_Fertigungsprotokoll_${safeDn}.pdf`);
   };
 
-  // ✅ Upload PDF to Weclapp via your existing demo route:
-  // POST /api/weclapp/shipment/[id]/upload  (multipart/form-data, file field "file")
   const uploadToWeclapp = async () => {
     setUploadError(null);
     setUploadOkMsg(null);
@@ -1141,7 +1388,7 @@ export default function Page() {
 
     setUploading(true);
     try {
-      const pdfBlob = buildPdfBlob();
+      const pdfBlob = await buildPdfBlob();
 
       const safeDn = (dnInput || "SHIPMENT").replace(/[^\w\-]+/g, "_");
       const filename = `NEXTWAVE_Fertigungsprotokoll_${safeDn}.pdf`;
@@ -1159,17 +1406,13 @@ export default function Page() {
       const j = await r.json().catch(() => null);
 
       if (!r.ok || !j?.success) {
-        const msg =
-          j?.message ||
-          j?.error ||
-          `Upload fehlgeschlagen (HTTP ${r.status}).`;
-
+        const msg = j?.message || j?.error || `Upload fehlgeschlagen (HTTP ${r.status}).`;
         setUploadError(msg);
         return;
       }
 
       setUploadOkMsg("✅ Upload erfolgreich – Dokument wurde an Weclapp Lieferschein angehängt.");
-    } catch (e: any) {
+    } catch {
       setUploadError("Upload fehlgeschlagen (Netzwerk/Server).");
     } finally {
       setUploading(false);
@@ -1179,7 +1422,6 @@ export default function Page() {
   const renderField = (f: FieldDef, r: Row) => {
     if (!shouldShowField(r, f)) return null;
 
-    // yn
     if (f.type === "yn") {
       const current = ((r as any)[f.key] as Yn) ?? "unset";
       const commentKey = getNoCommentKey(f.key);
@@ -1260,7 +1502,6 @@ export default function Page() {
       );
     }
 
-    // boolean
     if (f.type === "boolean") {
       const current = (r as any)[f.key] === true;
       return (
@@ -1271,7 +1512,6 @@ export default function Page() {
       );
     }
 
-    // text
     const current = String((r as any)[f.key] ?? "");
     return (
       <div key={f.key} className="space-y-2">
@@ -1285,15 +1525,16 @@ export default function Page() {
     );
   };
 
-  // =========================
-  // LOGIN SCREEN
-  // =========================
   if (!isAuthed) {
     return (
       <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 flex items-center justify-center p-6">
         <div className="w-full max-w-md rounded-3xl border border-neutral-200 bg-white p-6 shadow-[0_10px_30px_rgba(0,0,0,0.08)] dark:border-neutral-800 dark:bg-neutral-900">
-          <div className="text-xl font-extrabold text-neutral-900 dark:text-neutral-100">NEXTWAVE Manufacturing Hub 2.0</div>
-          <div className="text-sm text-neutral-500 dark:text-neutral-300 mt-1">Zugriff nur für autorisierte Mitarbeiter.</div>
+          <div className="text-xl font-extrabold text-neutral-900 dark:text-neutral-100">
+            NEXTWAVE Manufacturing Hub 2.0
+          </div>
+          <div className="text-sm text-neutral-500 dark:text-neutral-300 mt-1">
+            Zugriff nur für autorisierte Mitarbeiter.
+          </div>
 
           <div className="mt-6 space-y-3">
             <div className="text-sm font-semibold">E-Mail</div>
@@ -1314,7 +1555,7 @@ export default function Page() {
                 onChange={(e) => setLoginPassword(e.target.value)}
                 placeholder="••••••••"
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") doLogin();
+                  if (e.key === "Enter") void doLogin();
                 }}
               />
 
@@ -1343,7 +1584,9 @@ export default function Page() {
             </div>
 
             {loginError ? (
-              <div className="mt-2 rounded-2xl border border-red-300 bg-red-50 p-3 text-sm text-red-700">{loginError}</div>
+              <div className="mt-2 rounded-2xl border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+                {loginError}
+              </div>
             ) : null}
 
             <div className="pt-4 flex justify-end">
@@ -1351,7 +1594,8 @@ export default function Page() {
             </div>
 
             <div className="text-xs text-neutral-500 dark:text-neutral-300 pt-2">
-              Hinweis: Das ist nur ein UI-Gate. Für echte Sicherheit muss Auth serverseitig erfolgen (Cookie + Middleware).
+              Hinweis: Das ist nur ein UI-Gate. Für echte Sicherheit muss Auth serverseitig erfolgen
+              (Cookie + Middleware).
             </div>
           </div>
         </div>
@@ -1359,24 +1603,29 @@ export default function Page() {
     );
   }
 
-  // =========================
-  // MAIN UI
-  // =========================
   return (
     <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950">
       <div className="mx-auto max-w-6xl p-6 space-y-6">
-        {/* PREMIUM HEADER */}
         <div className="rounded-3xl overflow-hidden border border-neutral-200 dark:border-neutral-800">
           <div className="relative">
             <div className="absolute inset-0 bg-gradient-to-b from-neutral-950 to-neutral-900" />
-            <div className="absolute -top-24 -left-24 h-80 w-80 rounded-full blur-3xl opacity-50" style={{ background: ORANGE }} />
+            <div
+              className="absolute -top-24 -left-24 h-80 w-80 rounded-full blur-3xl opacity-50"
+              style={{ background: ORANGE }}
+            />
             <div className="absolute -top-28 -right-28 h-96 w-96 rounded-full blur-3xl opacity-25 bg-white" />
 
             <div className="relative px-6 py-5 sm:px-8 sm:py-6">
               <div className="flex items-start justify-between gap-6 flex-wrap">
                 <div className="flex items-center gap-4">
                   <div className="relative h-10 w-[260px] sm:h-12 sm:w-[340px]">
-                    <Image src={dark ? "/nextwave-logo-dark.png" : "/nextwave-logo-light.png"} alt="NEXTWAVE" fill className="object-contain" priority />
+                    <Image
+                      src={dark ? "/nextwave-logo-dark.png" : "/nextwave-logo-light.png"}
+                      alt="NEXTWAVE"
+                      fill
+                      className="object-contain"
+                      priority
+                    />
                   </div>
                 </div>
 
@@ -1391,13 +1640,16 @@ export default function Page() {
                   <div className="text-sm text-white/80">
                     {dnLoaded ? (
                       <>
-                        <span className="text-white/60 font-semibold">Kunde:</span> <span className="text-white font-semibold">{customerName}</span>{" "}
-                        <span className="text-white/35">•</span> <span className="text-white/60 font-semibold">Eingabe:</span>{" "}
+                        <span className="text-white/60 font-semibold">Kunde:</span>{" "}
+                        <span className="text-white font-semibold">{customerName}</span>{" "}
+                        <span className="text-white/35">•</span>{" "}
+                        <span className="text-white/60 font-semibold">Eingabe:</span>{" "}
                         <span className="text-white font-semibold">{dnInput}</span>
                         {documentNumber ? (
                           <>
                             {" "}
-                            <span className="text-white/35">•</span> <span className="text-white/60 font-semibold">Beleg:</span>{" "}
+                            <span className="text-white/35">•</span>{" "}
+                            <span className="text-white/60 font-semibold">Beleg:</span>{" "}
                             <span className="text-white font-semibold">{documentNumber}</span>
                           </>
                         ) : null}
@@ -1409,12 +1661,15 @@ export default function Page() {
 
                   <div className="text-sm text-white/75">
                     <span className="text-white/60 font-semibold">Gerätetyp:</span>{" "}
-                    <span className="text-white font-semibold">{deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet"}</span>
+                    <span className="text-white font-semibold">
+                      {deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet"}
+                    </span>
 
                     {operator ? (
                       <>
                         {" "}
-                        <span className="text-white/35">•</span> <span className="text-white/60 font-semibold">Bearbeiter:</span>{" "}
+                        <span className="text-white/35">•</span>{" "}
+                        <span className="text-white/60 font-semibold">Bearbeiter:</span>{" "}
                         <span className="text-white font-semibold">{operator}</span>
                       </>
                     ) : null}
@@ -1422,11 +1677,15 @@ export default function Page() {
                     {dnLoaded ? (
                       <>
                         {" "}
-                        <span className="text-white/35">•</span> <span className="text-white/60 font-semibold">S/N:</span>{" "}
+                        <span className="text-white/35">•</span>{" "}
+                        <span className="text-white/60 font-semibold">S/N:</span>{" "}
                         <span className="text-white font-semibold">
                           {confirmedCount}/{totalExpected} bestätigt
                         </span>{" "}
-                        <span className="text-white/35">•</span> <span className="text-white font-semibold">{doneCount}/{totalExpected} fertig</span>
+                        <span className="text-white/35">•</span>{" "}
+                        <span className="text-white font-semibold">
+                          {doneCount}/{totalExpected} fertig
+                        </span>
                       </>
                     ) : null}
                   </div>
@@ -1446,7 +1705,6 @@ export default function Page() {
                           // ignore
                         }
 
-                        // ✅ Nur Auth zurücksetzen, NICHT den Arbeitsstand löschen
                         setIsAuthed(false);
                         setLoginPassword("");
                         setLoginError(null);
@@ -1471,8 +1729,16 @@ export default function Page() {
                       aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
                     >
                       <span className={dark ? "text-white/60" : "text-white"}>Light</span>
-                      <span className={"h-6 w-11 rounded-full relative transition " + (dark ? "" : "bg-white/25")} style={dark ? { background: ORANGE } : undefined}>
-                        <span className={"absolute top-1 left-1 h-4 w-4 rounded-full bg-white transition " + (dark ? "translate-x-5" : "translate-x-0")} />
+                      <span
+                        className={"h-6 w-11 rounded-full relative transition " + (dark ? "" : "bg-white/25")}
+                        style={dark ? { background: ORANGE } : undefined}
+                      >
+                        <span
+                          className={
+                            "absolute top-1 left-1 h-4 w-4 rounded-full bg-white transition " +
+                            (dark ? "translate-x-5" : "translate-x-0")
+                          }
+                        />
                       </span>
                       <span className={dark ? "text-white" : "text-white/60"}>Dark</span>
                     </button>
@@ -1489,7 +1755,6 @@ export default function Page() {
           </div>
         </div>
 
-        {/* STEPS */}
         <Card>
           <CardBody>
             <div className="flex gap-3 overflow-auto pb-2 pt-4">
@@ -1510,7 +1775,9 @@ export default function Page() {
                     >
                       {done ? <Check className="h-5 w-5" /> : i + 1}
                     </div>
-                    <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{s.label}</div>
+                    <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                      {s.label}
+                    </div>
                   </div>
                 );
               })}
@@ -1518,10 +1785,12 @@ export default function Page() {
           </CardBody>
         </Card>
 
-        {/* DELIVERY */}
         {step === "delivery" && (
           <Card>
-            <CardHeader title="Lieferschein abrufen (Weclapp)" desc="Eingabe z. B. Lieferschein-Nummer → Live aus Weclapp." />
+            <CardHeader
+              title="Lieferschein abrufen (Weclapp)"
+              desc="Eingabe z. B. Lieferschein-Nummer → Live aus Weclapp."
+            />
             <CardBody>
               <div className="space-y-4">
                 <div className="flex flex-col sm:flex-row gap-3 max-w-2xl">
@@ -1531,7 +1800,7 @@ export default function Page() {
                     onChange={(e) => setDnInput(e.target.value)}
                     placeholder="z. B. 31969"
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") loadDeliveryFromWeclapp();
+                      if (e.key === "Enter") void loadDeliveryFromWeclapp();
                     }}
                   />
 
@@ -1572,7 +1841,9 @@ export default function Page() {
                     </div>
                     <div>
                       <b>Gerätetyp (Warengruppe):</b>{" "}
-                      <span className="font-semibold">{deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet"}</span>
+                      <span className="font-semibold">
+                        {deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet"}
+                      </span>
                     </div>
 
                     <div className="flex flex-col gap-1">
@@ -1593,9 +1864,15 @@ export default function Page() {
                       {deviceItems.length ? (
                         <div className="flex flex-wrap gap-2">
                           {deviceItems
-                            .filter((x) => (x.categoryName || "").trim() === "Barebone Mini-PC" || (x.categoryName || "").trim() === "Rugged Tablet")
+                            .filter(
+                              (x) =>
+                                (x.categoryName || "").trim() === "Barebone Mini-PC" ||
+                                (x.categoryName || "").trim() === "Rugged Tablet"
+                            )
                             .map((x) => (
-                              <Chip key={`${x.articleId}-${x.title}`}>{`${x.categoryName || "—"}: ${x.title}`}</Chip>
+                              <Chip key={`${x.articleId}-${x.title}`}>
+                                {`${x.categoryName || "—"}: ${x.title}`}
+                              </Chip>
                             ))}
                         </div>
                       ) : (
@@ -1652,7 +1929,8 @@ export default function Page() {
 
                 {dnLoaded && expectedSerials.length === 0 ? (
                   <div className="text-xs text-neutral-500 dark:text-neutral-300">
-                    Hinweis: Es wurden keine Seriennummern in den Warengruppen <b>Barebone Mini-PC</b> / <b>Rugged Tablet</b> gefunden.
+                    Hinweis: Es wurden keine Seriennummern in den Warengruppen <b>Barebone Mini-PC</b> /{" "}
+                    <b>Rugged Tablet</b> gefunden.
                   </div>
                 ) : null}
               </div>
@@ -1660,10 +1938,12 @@ export default function Page() {
           </Card>
         )}
 
-        {/* CHECKS */}
         {step === "checks" && (
           <Card>
-            <CardHeader title="Fertigung – Scan-Workflow" desc="Felder werden dynamisch aus Layout geladen (inkl. Sections + Visible-When)." />
+            <CardHeader
+              title="Fertigung – Scan-Workflow"
+              desc="Felder werden dynamisch aus Layout geladen (inkl. Sections + Visible-When)."
+            />
             <CardBody>
               <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4">
                 <div className="rounded-2xl border border-neutral-200 p-4 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950">
@@ -1710,7 +1990,11 @@ export default function Page() {
                       style={autoAdvance ? { background: ORANGE } : undefined}
                       onClick={() => setAutoAdvance((v) => !v)}
                     >
-                      <span className={`absolute top-1 left-1 h-5 w-5 rounded-full bg-white transition ${autoAdvance ? "translate-x-5" : "translate-x-0"}`} />
+                      <span
+                        className={`absolute top-1 left-1 h-5 w-5 rounded-full bg-white transition ${
+                          autoAdvance ? "translate-x-5" : "translate-x-0"
+                        }`}
+                      />
                     </button>
                   </div>
 
@@ -1732,7 +2016,13 @@ export default function Page() {
                           }`}
                         >
                           <span className="font-mono text-sm truncate">{r.sn}</span>
-                          {status === "fertig" ? <Chip tone="green">fertig</Chip> : status === "bestätigt" ? <Chip tone="blue">bestätigt</Chip> : <Chip>offen</Chip>}
+                          {status === "fertig" ? (
+                            <Chip tone="green">fertig</Chip>
+                          ) : status === "bestätigt" ? (
+                            <Chip tone="blue">bestätigt</Chip>
+                          ) : (
+                            <Chip>offen</Chip>
+                          )}
                         </button>
                       );
                     })}
@@ -1753,18 +2043,21 @@ export default function Page() {
                     <div ref={activeUnitRef} className="rounded-2xl border border-neutral-200 p-6 bg-white dark:border-neutral-800 dark:bg-neutral-900">
                       <div className="flex items-start justify-between gap-4 flex-wrap">
                         <div>
-                          <div className="text-xs text-neutral-500 dark:text-neutral-300">Aktuelle Seriennummer</div>
+                          <div className="text-xs text-neutral-500 dark:text-neutral-300">
+                            Aktuelle Seriennummer
+                          </div>
                           <div className="font-mono text-xl font-extrabold">{activeRow.sn}</div>
                           <div className="text-xs text-neutral-500 dark:text-neutral-300 mt-1">
                             Scan durchgeführt:{" "}
-                            <span className="font-semibold text-neutral-900 dark:text-neutral-100">{activeRow.confirmed ? "Ja" : "Nein"}</span>
+                            <span className="font-semibold text-neutral-900 dark:text-neutral-100">
+                              {activeRow.confirmed ? "Ja" : "Nein"}
+                            </span>
                           </div>
                         </div>
                         {isRowComplete(activeRow) ? <Chip tone="green">fertig</Chip> : <Chip>offen</Chip>}
                       </div>
 
                       <div className="mt-6 space-y-6">
-                        {/* ✅ Sections + fields */}
                         {deviceSections.map((sec) => (
                           <div key={sec.title} className="space-y-4">
                             <div className="text-xs font-extrabold tracking-wide text-neutral-500 dark:text-neutral-300 uppercase">
@@ -1800,10 +2093,12 @@ export default function Page() {
           </Card>
         )}
 
-        {/* SUMMARY */}
         {step === "summary" && (
           <Card>
-            <CardHeader title="Zusammenfassung" desc="PDF Vorschau/Download, Signatur, Upload zu Weclapp (Shipment Dokumente)." />
+            <CardHeader
+              title="Zusammenfassung"
+              desc="PDF Vorschau/Download, Signatur, Upload zu Weclapp (Shipment Dokumente)."
+            />
             <CardBody>
               <div className="rounded-2xl border border-neutral-200 p-4 bg-neutral-50 space-y-2 dark:border-neutral-800 dark:bg-neutral-950">
                 <div>
@@ -1841,11 +2136,14 @@ export default function Page() {
                 <div>
                   <b>Bearbeiter:</b> {operator}
                 </div>
-
                 <div>
-                  <b>Datum:</b> {todayStr} <span className="text-xs text-neutral-500 dark:text-neutral-300">(automatisch)</span>
+                  <b>Datum:</b> {nowInfo.date}{" "}
+                  <span className="text-xs text-neutral-500 dark:text-neutral-300">(automatisch)</span>
                 </div>
-
+                <div>
+                  <b>Uhrzeit:</b> {nowInfo.time}{" "}
+                  <span className="text-xs text-neutral-500 dark:text-neutral-300">(automatisch)</span>
+                </div>
                 <div>
                   <b>Fortschritt:</b> {doneCount}/{totalExpected} fertig
                 </div>
@@ -1863,17 +2161,25 @@ export default function Page() {
                 </div>
 
                 {uploadError ? (
-                  <div className="mt-3 rounded-2xl border border-red-300 bg-red-50 p-3 text-sm text-red-700">{uploadError}</div>
+                  <div className="mt-3 rounded-2xl border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+                    {uploadError}
+                  </div>
                 ) : null}
 
                 {uploadOkMsg ? (
-                  <div className="mt-3 rounded-2xl border border-green-300 bg-green-50 p-3 text-sm text-green-800">{uploadOkMsg}</div>
+                  <div className="mt-3 rounded-2xl border border-green-300 bg-green-50 p-3 text-sm text-green-800">
+                    {uploadOkMsg}
+                  </div>
                 ) : null}
               </div>
 
               <div className="flex flex-wrap gap-3 pt-4">
                 <Btn variant="outline" onClick={() => setStep("checks")}>
                   <ArrowLeft className="mr-2 h-4 w-4" /> Zurück
+                </Btn>
+
+                <Btn onClick={downloadPdf}>
+                  <Download className="mr-2 h-4 w-4" /> PDF herunterladen
                 </Btn>
 
                 <Btn onClick={() => setShowPdfPreview(true)}>PDF Vorschau</Btn>
@@ -1892,13 +2198,12 @@ export default function Page() {
               </div>
 
               <div className="text-xs text-neutral-500 dark:text-neutral-300 pt-2">
-                Upload-Logik: POST multipart/form-data → <b>/api/weclapp/shipment/{shipmentId || "…"} /upload</b> (Route existiert bereits).
+                Upload-Logik: POST multipart/form-data → <b>/api/weclapp/shipment/{shipmentId || "…"} /upload</b>
               </div>
             </CardBody>
           </Card>
         )}
 
-        {/* PDF MODAL */}
         {showPdfPreview && (
           <div className="fixed inset-0 z-50 bg-black/70 px-4 py-6" onClick={() => setShowPdfPreview(false)}>
             <div
@@ -1912,7 +2217,7 @@ export default function Page() {
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={downloadPdf}
+                      onClick={() => void downloadPdf()}
                       className="h-10 px-4 rounded-2xl text-white font-semibold inline-flex items-center gap-2 hover:opacity-90"
                       style={{ background: ORANGE }}
                       aria-label="PDF herunterladen"
@@ -1932,7 +2237,6 @@ export default function Page() {
                   </div>
                 </div>
 
-                {/* Upload Status Meldung */}
                 {uploadOkMsg && (
                   <div className="px-6 py-3 bg-green-100 text-green-800 text-sm font-semibold border-b border-green-200">
                     {uploadOkMsg}
@@ -1962,6 +2266,12 @@ export default function Page() {
                     <b>Shipment-ID:</b> {shipmentId || "—"}
                   </div>
                   <div>
+                    <b>Datum:</b> {nowInfo.date}
+                  </div>
+                  <div>
+                    <b>Uhrzeit:</b> {nowInfo.time}
+                  </div>
+                  <div>
                     <b>Produkt(e):</b> {productNames.length ? productNames.join(" • ") : "—"}
                   </div>
                   <div>
@@ -1986,45 +2296,56 @@ export default function Page() {
                         </div>
                       </div>
 
-                      <div className="mt-3 text-sm space-y-1">
-                        {deviceFields.map((f) => {
-                          if (!shouldShowField(r, f)) return null;
-
-                          const v: any = (r as any)[f.key];
-
-                          if (f.type === "yn") {
-                            const ynValue = (v as Yn) ?? "unset";
-                            const commentKey = getNoCommentKey(f.key);
-                            const commentValue = String((r as any)[commentKey] ?? "").trim();
-
-                            return (
-                              <React.Fragment key={f.key}>
-                                <div>
-                                  <b>{f.label}</b> {ynLabel(ynValue)}
-                                </div>
-                                {ynValue === "no" && f.requiresCommentWhenNo ? (
-                                  <div>
-                                    <b>Kommentar:</b> {commentValue || "—"}
-                                  </div>
-                                ) : null}
-                              </React.Fragment>
-                            );
-                          }
-
-                          if (f.type === "boolean") {
-                            return (
-                              <div key={f.key} className="rounded-lg border border-neutral-200 dark:border-neutral-800 px-3 py-2">
-                                {f.label}: <b>{boolLabel(getBoolValue(v))}</b>
-                              </div>
-                            );
-                          }
-
-                          return (
-                            <div key={f.key}>
-                              <b>{f.label}</b> {String(v ?? "").trim() || "—"}
+                      <div className="mt-3 text-sm space-y-3">
+                        {deviceSections.map((sec) => (
+                          <div key={`${r.sn}-${sec.title}`} className="space-y-2">
+                            <div className="text-xs font-bold uppercase text-neutral-500 dark:text-neutral-300">
+                              {sec.title}
                             </div>
-                          );
-                        })}
+
+                            {(sec.fields || []).map((f) => {
+                              if (!shouldShowField(r, f)) return null;
+
+                              const v: any = (r as any)[f.key];
+
+                              if (f.type === "yn") {
+                                const ynValue = (v as Yn) ?? "unset";
+                                const commentKey = getNoCommentKey(f.key);
+                                const commentValue = String((r as any)[commentKey] ?? "").trim();
+
+                                return (
+                                  <React.Fragment key={f.key}>
+                                    <div>
+                                      <b>{f.label}:</b> {ynLabel(ynValue)}
+                                    </div>
+                                    {ynValue === "no" && f.requiresCommentWhenNo ? (
+                                      <div className="pl-4 text-red-700 dark:text-red-300">
+                                        <b>Kommentar:</b> {commentValue || "—"}
+                                      </div>
+                                    ) : null}
+                                  </React.Fragment>
+                                );
+                              }
+
+                              if (f.type === "boolean") {
+                                return (
+                                  <div
+                                    key={f.key}
+                                    className="rounded-lg border border-neutral-200 dark:border-neutral-800 px-3 py-2"
+                                  >
+                                    {f.label}: <b>{boolLabel(getBoolValue(v))}</b>
+                                  </div>
+                                );
+                              }
+
+                              return (
+                                <div key={f.key}>
+                                  <b>{f.label}:</b> {String(v ?? "").trim() || "—"}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))}
                       </div>
                     </div>
                   ))}
@@ -2032,7 +2353,10 @@ export default function Page() {
 
                 <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 p-4 text-sm space-y-2">
                   <div>
-                    <b>Datum:</b> {todayStr}
+                    <b>Datum:</b> {nowInfo.date}
+                  </div>
+                  <div>
+                    <b>Uhrzeit:</b> {nowInfo.time}
                   </div>
                   <div>
                     <b>Kürzel:</b> {signatureInitials || "—"}
@@ -2041,7 +2365,6 @@ export default function Page() {
                   <div>
                     <div className="text-xs text-neutral-500 dark:text-neutral-300 mb-2">Unterschrift</div>
                     {signatureDataUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={signatureDataUrl}
                         alt="Unterschrift"
