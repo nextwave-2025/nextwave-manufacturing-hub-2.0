@@ -909,55 +909,63 @@ export default function Page() {
     }
   };
 
-  /** =========================
-   * Premium PDF
-   * ========================= */
+// =====================================================================
+// ERSETZE in page.tsx die komplette Funktion createPdfDoc()
+// von "const createPdfDoc = async (): Promise<jsPDF> => {" 
+// bis zum abschliessenden "};"
+// =====================================================================
 
   const createPdfDoc = async (): Promise<jsPDF> => {
     const doc = new jsPDF({ unit: "pt", format: "a4" });
 
-    const pageWidth = 595.28;
+    const pageWidth  = 595.28;
     const pageHeight = 841.89;
-    const margin = 34;
+    const margin     = 36;
     const contentWidth = pageWidth - margin * 2;
 
-    const colors = {
-      orange: [241, 81, 36] as const,
-      dark: [17, 18, 22] as const,
-      dark2: [30, 31, 36] as const,
-      text: [28, 28, 28] as const,
-      muted: [103, 103, 103] as const,
-      line: [227, 227, 227] as const,
-      soft: [247, 247, 248] as const,
-      soft2: [242, 242, 243] as const,
-      white: [255, 255, 255] as const,
-      greenBg: [238, 248, 242] as const,
-      greenText: [17, 121, 64] as const,
-      redText: [170, 55, 35] as const,
-      shadow: [215, 215, 215] as const,
-    };
+    // ── Farben ──────────────────────────────────────────────────────────
+    const C = {
+      orange:   [241, 81, 36]   as const,
+      dark:     [15, 16, 20]    as const,   // tiefschwarz wie im Web-Header
+      dark2:    [26, 27, 33]    as const,
+      dark3:    [38, 39, 48]    as const,
+      text:     [24, 24, 24]    as const,
+      muted:    [110, 110, 110] as const,
+      mutedDark:[160, 160, 160] as const,
+      line:     [225, 225, 225] as const,
+      lineDark: [210, 210, 210] as const,
+      soft:     [246, 246, 247] as const,
+      soft2:    [240, 240, 242] as const,
+      white:    [255, 255, 255] as const,
+      greenBg:  [235, 248, 240] as const,
+      greenTxt: [16, 118, 62]   as const,
+      redTxt:   [168, 52, 32]   as const,
+      shadow:   [210, 210, 212] as const,
+      warmGlow: [100, 32, 12]   as const,   // Glow-Ring im Header
+    } as const;
 
     let y = 0;
 
-    const setText = (rgb: readonly number[]) => doc.setTextColor(rgb[0], rgb[1], rgb[2]);
-    const setFill = (rgb: readonly number[]) => doc.setFillColor(rgb[0], rgb[1], rgb[2]);
-    const setDraw = (rgb: readonly number[]) => doc.setDrawColor(rgb[0], rgb[1], rgb[2]);
+    // ── Basis-Helfer ────────────────────────────────────────────────────
+    const setT  = (rgb: readonly number[]) => doc.setTextColor(rgb[0], rgb[1], rgb[2]);
+    const setF  = (rgb: readonly number[]) => doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+    const setD  = (rgb: readonly number[]) => doc.setDrawColor(rgb[0], rgb[1], rgb[2]);
 
     const write = (
       text: string,
       x: number,
       yPos: number,
-      options?: {
+      opts?: {
         size?: number;
         bold?: boolean;
         color?: readonly number[];
         align?: "left" | "right" | "center";
       }
     ) => {
-      doc.setFont("helvetica", options?.bold ? "bold" : "normal");
-      doc.setFontSize(options?.size ?? 10);
-      setText(options?.color ?? colors.text);
-      doc.text(text, x, yPos, options?.align ? { align: options.align } : undefined);
+      doc.setFont("helvetica", opts?.bold ? "bold" : "normal");
+      doc.setFontSize(opts?.size ?? 10);
+      setT(opts?.color ?? C.text);
+      doc.text(text, x, yPos, opts?.align ? { align: opts.align } : undefined);
     };
 
     const writeWrapped = (
@@ -965,395 +973,413 @@ export default function Page() {
       x: number,
       yPos: number,
       maxWidth: number,
-      options?: {
+      opts?: {
         size?: number;
         bold?: boolean;
         color?: readonly number[];
         lineHeight?: number;
       }
-    ) => {
-      doc.setFont("helvetica", options?.bold ? "bold" : "normal");
-      doc.setFontSize(options?.size ?? 10);
-      setText(options?.color ?? colors.text);
+    ): number => {
+      doc.setFont("helvetica", opts?.bold ? "bold" : "normal");
+      doc.setFontSize(opts?.size ?? 10);
+      setT(opts?.color ?? C.text);
       const lines = doc.splitTextToSize(text || "—", maxWidth);
       doc.text(lines, x, yPos);
-      return lines.length * (options?.lineHeight ?? 14);
+      return lines.length * (opts?.lineHeight ?? 14);
     };
 
     const ensureSpace = (needed: number) => {
-      if (y + needed > pageHeight - 44) {
+      if (y + needed > pageHeight - 50) {
         doc.addPage();
-        y = 40;
+        y = 44;
       }
     };
 
-    const drawSoftShadowCard = (x: number, y: number, w: number, h: number, r = 18) => {
-      setFill(colors.shadow);
-      doc.roundedRect(x + 3, y + 3, w, h, r, r, "F");
-      setFill(colors.white);
-      setDraw(colors.line);
-      doc.roundedRect(x, y, w, h, r, r, "FD");
+    // ── Shadow-Card ─────────────────────────────────────────────────────
+    const drawShadowCard = (x: number, cy: number, w: number, h: number, r = 16) => {
+      setF(C.shadow);
+      doc.roundedRect(x + 2, cy + 3, w, h, r, r, "F");
+      setF(C.white);
+      setD(C.line);
+      doc.roundedRect(x, cy, w, h, r, r, "FD");
     };
+
+    // ── PREMIUM HEADER  ──────────────────────────────────────────────────
+    // Ziel: identisch zum SaaS-Header
+    //   • Tiefschwarzer Hintergrund (kein Grauton)
+    //   • Warmer orangeroter Glow-Blob links
+    //   • Logo links, Titel/Infos rechts
+    //   • Orangefarbene Trennlinie unten
+    // ────────────────────────────────────────────────────────────────────
+    const HEADER_H    = 148;
+    const HEADER_Y    = 10;
+    const HEADER_R    = 20;
 
     const drawHeader = async () => {
-      // shadow
-      setFill(colors.shadow);
-      doc.roundedRect(16, 14, pageWidth - 32, 130, 24, 24, "F");
+      // ── 1. Schatten-Schicht (leicht versetzt, sehr weich) ──
+      setF([195, 195, 197]);
+      doc.roundedRect(14, HEADER_Y + 5, pageWidth - 28, HEADER_H, HEADER_R, HEADER_R, "F");
 
-      // main card
-      setFill(colors.dark);
-      doc.roundedRect(12, 10, pageWidth - 24, 130, 24, 24, "F");
+      // ── 2. Haupt-Background ──
+      setF(C.dark);
+      doc.roundedRect(12, HEADER_Y, pageWidth - 24, HEADER_H, HEADER_R, HEADER_R, "F");
 
-      // faux gradient / glow like SaaS
-      setFill([120, 38, 16]);
-      doc.circle(70, 78, 68, "F");
-      setFill([80, 26, 12]);
-      doc.circle(120, 76, 86, "F");
-      setFill(colors.dark2);
-      doc.circle(pageWidth - 50, 76, 120, "F");
-      setFill(colors.dark);
-      doc.roundedRect(12, 10, pageWidth - 24, 130, 24, 24, "F");
+      // ── 3. Warmer Glow-Blob (links, simuliert den CSS-blur im Web) ──
+      //    Da jsPDF kein Blur kennt, layern wir 4 abnehmende Circles
+      //    mit steigendem Alpha von innen nach aussen
+      const glowCx = 80;
+      const glowCy = HEADER_Y + HEADER_H / 2 + 4;
+      const glowLayers: Array<[number, number]> = [
+        [90, 0.55],
+        [64, 0.40],
+        [42, 0.28],
+        [24, 0.18],
+      ];
+      for (const [radius, alpha] of glowLayers) {
+        doc.setFillColor(
+          Math.round(C.orange[0] * alpha + C.dark[0] * (1 - alpha)),
+          Math.round(C.orange[1] * alpha + C.dark[1] * (1 - alpha)),
+          Math.round(C.orange[2] * alpha + C.dark[2] * (1 - alpha))
+        );
+        doc.circle(glowCx, glowCy, radius, "F");
+      }
+      // Innerer Kern
+      setF([220, 65, 28]);
+      doc.circle(glowCx, glowCy, 16, "F");
 
-      try {
-        const logoDataUrl = await loadImageAsDataUrl("/nextwave-logo-light.png");
-        doc.addImage(logoDataUrl, "PNG", 28, 36, 185, 42);
-      } catch {
-        write("NEXTWAVE", 30, 68, {
-          size: 24,
-          bold: true,
-          color: colors.white,
-        });
+      // ── 4. Rechts: subtiler weisslicher Schimmer (wie im Web) ──
+      const rightGlowX = pageWidth - 60;
+      const rgLayers: Array<[number, number]> = [
+        [100, 0.04],
+        [70,  0.06],
+        [44,  0.04],
+      ];
+      for (const [radius, alpha] of rgLayers) {
+        doc.setFillColor(
+          Math.round(255 * alpha + C.dark[0] * (1 - alpha)),
+          Math.round(255 * alpha + C.dark[1] * (1 - alpha)),
+          Math.round(255 * alpha + C.dark[2] * (1 - alpha))
+        );
+        doc.circle(rightGlowX, glowCy, radius, "F");
       }
 
-      write("NEXTWAVE Manufacturing Hub 2.0", pageWidth - 34, 56, {
-        size: 18,
+      // ── 5. Logo ──
+      const logoY  = HEADER_Y + 20;
+      const logoH  = 48;
+      const logoW  = 200; // Seitenverhältnis ca. 4.1:1 (typisch)
+      try {
+        const logoDataUrl = await loadImageAsDataUrl("/nextwave-logo-light.png");
+        doc.addImage(logoDataUrl, "PNG", 30, logoY, logoW, logoH);
+      } catch {
+        write("NEXTWAVE", 34, logoY + 32, { size: 26, bold: true, color: C.white });
+      }
+
+      // ── 6. Rechte Seite: Titel, Subtitle, Claim ──
+      const rx = pageWidth - 36;
+
+      write("NEXTWAVE Manufacturing Hub 2.0", rx, HEADER_Y + 42, {
+        size: 19,
         bold: true,
-        color: colors.orange,
+        color: C.orange,
         align: "right",
       });
 
-      write("Fertigungsprotokoll", pageWidth - 34, 82, {
-        size: 13,
+      write("Fertigungsprotokoll", rx, HEADER_Y + 68, {
+        size: 13.5,
         bold: true,
-        color: colors.white,
+        color: C.white,
         align: "right",
       });
 
-      write("NEXTWAVE GmbH – Premium Manufacturing Documentation", pageWidth - 34, 106, {
+      write("NEXTWAVE GmbH – Premium Manufacturing Documentation", rx, HEADER_Y + 90, {
         size: 8.5,
-        color: [225, 225, 225],
+        color: [210, 210, 210],
         align: "right",
       });
 
-      setFill(colors.orange);
-      doc.roundedRect(12, 144, pageWidth - 24, 7, 3, 3, "F");
+      // ── 7. Copyright-Zeile (analog zum Web-Header) ──
+      write("© NEXTWAVE GmbH – All rights reserved 2026", rx, HEADER_Y + 108, {
+        size: 7.5,
+        color: [160, 160, 160],
+        align: "right",
+      });
+
+      // ── 8. Trennlinie orange (wie im Web) ──
+      const lineY = HEADER_Y + HEADER_H + 4;
+      setF(C.orange);
+      doc.roundedRect(12, lineY, pageWidth - 24, 6, 3, 3, "F");
     };
 
-    const measureInfoCardHeight = (
-      width: number,
-      rowsData: Array<{ label: string; value: string }>
-    ) => {
-      let h = 48;
-      rowsData.forEach((row) => {
-        const lines = doc.splitTextToSize(row.value || "—", width - 132);
-        h += Math.max(22, lines.length * 14);
-      });
-      h += 10;
+    // ── Info-Card Höhenberechnung ────────────────────────────────────────
+    const measureInfoCardH = (w: number, rows: Array<{ label: string; value: string }>) => {
+      let h = 44; // Header-Bereich (Titel + Padding)
+      for (const row of rows) {
+        const lines = doc.splitTextToSize(row.value || "—", w - 130);
+        h += Math.max(20, lines.length * 14);
+      }
+      h += 12; // Bottom-Padding
       return h;
     };
 
+    // ── Info-Card zeichnen ───────────────────────────────────────────────
     const drawInfoCard = (
-      startX: number,
-      startY: number,
-      width: number,
+      cx: number,
+      cy: number,
+      w: number,
       title: string,
-      rowsData: Array<{ label: string; value: string }>
-    ) => {
-      const cardHeight = measureInfoCardHeight(width, rowsData);
+      rows: Array<{ label: string; value: string }>
+    ): number => {
+      const cardH = measureInfoCardH(w, rows);
 
-      setFill(colors.soft);
-      setDraw(colors.line);
-      doc.roundedRect(startX, startY, width, cardHeight, 16, 16, "FD");
+      // Soft Background
+      setF(C.soft);
+      setD(C.line);
+      doc.roundedRect(cx, cy, w, cardH, 14, 14, "FD");
 
-      write(title, startX + 18, startY + 22, {
-        size: 10,
-        bold: true,
-        color: colors.orange,
-      });
+      // Titel
+      write(title, cx + 16, cy + 20, { size: 9.5, bold: true, color: C.orange });
 
-      let yy = startY + 52;
-      rowsData.forEach((row) => {
-        write(`${row.label}:`, startX + 18, yy, {
+      // Horizontale Trennlinie unter Titel
+      setD(C.lineDark);
+      doc.setLineWidth(0.4);
+      doc.line(cx + 14, cy + 28, cx + w - 14, cy + 28);
+      doc.setLineWidth(0.5); // reset
+
+      let yy = cy + 44;
+      for (const row of rows) {
+        write(`${row.label}:`, cx + 16, yy, { size: 8.5, bold: true, color: C.muted });
+
+        const h = writeWrapped(row.value || "—", cx + 120, yy, w - 136, {
           size: 9,
-          bold: true,
-          color: colors.muted,
-        });
-
-        const height = writeWrapped(row.value || "—", startX + 122, yy, width - 140, {
-          size: 9.2,
-          color: colors.text,
+          color: C.text,
           lineHeight: 14,
         });
-
-        yy += Math.max(22, height + 2);
-      });
-
-      return cardHeight;
+        yy += Math.max(20, h + 2);
+      }
+      return cardH;
     };
 
-    const getFieldValueLabel = (r: Row, f: FieldDef) => {
+    // ── Zeilen für Unit-Card ─────────────────────────────────────────────
+    const getFieldValueLabel = (r: Row, f: FieldDef): string => {
       const v: any = (r as any)[f.key];
-
-      if (f.type === "yn") return ynLabel((v as Yn) ?? "unset");
+      if (f.type === "yn")      return ynLabel((v as Yn) ?? "unset");
       if (f.type === "boolean") return boolLabel(getBoolValue(v));
       return String(v ?? "").trim() || "—";
     };
 
-    const getVisibleFieldLines = (r: Row) => {
-      const lines: Array<{
-        section?: string;
-        label: string;
-        value: string;
-        isSection?: boolean;
-      }> = [];
-
-      deviceSections.forEach((sec) => {
-        const visibleFields = (sec.fields || []).filter((f) => shouldShowField(r, f));
-        if (!visibleFields.length) return;
-
-        lines.push({
-          section: sec.title,
-          label: sec.title,
-          value: "",
-          isSection: true,
-        });
-
-        visibleFields.forEach((f) => {
-          lines.push({
-            section: sec.title,
-            label: f.label,
-            value: getFieldValueLabel(r, f),
-          });
-
+    const getVisibleLines = (r: Row) => {
+      const lines: Array<{ label: string; value: string; isSection?: boolean }> = [];
+      for (const sec of deviceSections) {
+        const visible = (sec.fields || []).filter((f) => shouldShowField(r, f));
+        if (!visible.length) continue;
+        lines.push({ label: sec.title, value: "", isSection: true });
+        for (const f of visible) {
+          lines.push({ label: f.label, value: getFieldValueLabel(r, f) });
           if (f.type === "yn" && f.requiresCommentWhenNo) {
             const val = (r as any)[f.key] as Yn;
-            const commentKey = getNoCommentKey(f.key);
-            const comment = String((r as any)[commentKey] ?? "").trim();
-
             if (val === "no") {
-              lines.push({
-                section: sec.title,
-                label: "Kommentar",
-                value: comment || "—",
-              });
+              const ck = getNoCommentKey(f.key);
+              lines.push({ label: "Kommentar", value: String((r as any)[ck] ?? "").trim() || "—" });
             }
           }
-        });
-      });
-
+        }
+      }
       return lines;
     };
 
-    const estimateUnitHeight = (r: Row) => {
-      const lines = getVisibleFieldLines(r);
-      let h = 78; // header + status
-
-      lines.forEach((line) => {
-        if (line.isSection) {
-          h += 30;
-          return;
-        }
-
-        const wrapped = doc.splitTextToSize(line.value || "—", 250);
-        h += Math.max(22, wrapped.length * 14 + 2);
-      });
-
-      h += 14;
+    const estimateUnitH = (r: Row): number => {
+      const lines = getVisibleLines(r);
+      let h = 72; // Header-Zeile + Status-Chips
+      for (const line of lines) {
+        if (line.isSection) { h += 28; continue; }
+        const wrapped = doc.splitTextToSize(line.value || "—", contentWidth - 180);
+        h += Math.max(20, wrapped.length * 14 + 2);
+      }
+      h += 12;
       return h;
     };
 
+    // ── Unit-Card ────────────────────────────────────────────────────────
     const drawUnitCard = (r: Row, idx: number) => {
-      const cardHeight = estimateUnitHeight(r);
-      ensureSpace(cardHeight);
+      const cardH = estimateUnitH(r);
+      ensureSpace(cardH);
 
-      drawSoftShadowCard(margin, y, contentWidth, cardHeight, 18);
+      drawShadowCard(margin, y, contentWidth, cardH, 16);
 
-      // dark top bar
-      setFill(colors.dark);
-      doc.roundedRect(margin, y, contentWidth, 40, 18, 18, "F");
-      doc.rect(margin, y + 20, contentWidth, 20, "F");
+      // Dunkler Header-Streifen
+      const UNIT_HEADER_H = 38;
+      setF(C.dark2);
+      doc.roundedRect(margin, y, contentWidth, UNIT_HEADER_H, 16, 16, "F");
+      // Ecken unten quadratisch machen (Trick: ein Rect darüber)
+      doc.rect(margin, y + UNIT_HEADER_H - 16, contentWidth, 16, "F");
 
-      write(`${idx + 1}. Seriennummer`, margin + 18, y + 25, {
-        size: 10,
-        bold: true,
-        color: colors.white,
+      // Nummer + S/N
+      write(`${idx + 1}.`, margin + 14, y + 24, { size: 9, bold: true, color: C.orange });
+      write("Seriennummer", margin + 30, y + 24, { size: 9, bold: false, color: [190, 190, 190] });
+      write(r.sn, pageWidth - margin - 14, y + 24, {
+        size: 10.5, bold: true, color: C.white, align: "right",
       });
 
-      write(r.sn, pageWidth - margin - 18, y + 25, {
-        size: 11,
-        bold: true,
-        color: colors.white,
-        align: "right",
+      // Status-Chips
+      let yy = y + UNIT_HEADER_H + 14;
+
+      // Chip "Scan"
+      const scanOk = r.confirmed;
+      setF(scanOk ? C.greenBg : C.soft2);
+      setD(scanOk ? [180, 230, 200] : C.line);
+      doc.roundedRect(margin + 14, yy - 10, 162, 22, 10, 10, "FD");
+      write(scanOk ? "✓  Scan durchgeführt" : "–  Scan ausstehend", margin + 26, yy + 3, {
+        size: 8.5, bold: true, color: scanOk ? C.greenTxt : C.muted,
       });
 
-      let yy = y + 62;
+      // Chip "Status"
+      const done = isRowComplete(r);
+      setF(done ? C.greenBg : C.soft2);
+      setD(done ? [180, 230, 200] : C.line);
+      doc.roundedRect(pageWidth - margin - 178, yy - 10, 162, 22, 10, 10, "FD");
+      write(done ? "✓  Status: Fertig" : "○  Status: Offen",
+        pageWidth - margin - 178 + 81, yy + 3, {
+          size: 8.5, bold: true, color: done ? C.greenTxt : C.muted, align: "center",
+        });
 
-      setFill(colors.soft2);
-      doc.roundedRect(margin + 16, yy - 12, 164, 24, 10, 10, "F");
-      write(`Scan: ${r.confirmed ? "Durchgeführt" : "Nicht durchgeführt"}`, margin + 28, yy + 4, {
-        size: 9,
-        bold: true,
-        color: r.confirmed ? colors.greenText : colors.redText,
-      });
+      yy += 28;
 
-      const statusFinished = isRowComplete(r);
-      setFill(statusFinished ? colors.greenBg : colors.soft2);
-      doc.roundedRect(pageWidth - margin - 146, yy - 12, 130, 24, 10, 10, "F");
-      write(statusFinished ? "Status: Fertig" : "Status: Offen", pageWidth - margin - 81, yy + 4, {
-        size: 9,
-        bold: true,
-        color: statusFinished ? colors.greenText : colors.muted,
-        align: "center",
-      });
+      // Felder
+      const labelX = margin + 16;
+      const valueX = margin + 152;
+      const valueW = contentWidth - 168;
 
-      yy += 34;
-
-      const lines = getVisibleFieldLines(r);
-      const labelX = margin + 18;
-      const valueX = margin + 160; // extra rechts
-      const valueWidth = contentWidth - 186;
-
-      lines.forEach((line) => {
+      for (const line of getVisibleLines(r)) {
         if (line.isSection) {
-          setFill(colors.soft2);
-          doc.roundedRect(margin + 14, yy - 11, contentWidth - 28, 22, 11, 11, "F");
-          write(line.label, margin + 28, yy + 4, {
-            size: 9,
-            bold: true,
-            color: colors.orange,
-          });
-          yy += 30;
-          return;
+          // Section-Divider
+          setF(C.soft2);
+          setD(C.line);
+          doc.roundedRect(margin + 12, yy - 9, contentWidth - 24, 20, 10, 10, "FD");
+          write(line.label, margin + 26, yy + 3, { size: 8.5, bold: true, color: C.orange });
+          yy += 28;
+          continue;
         }
 
-        write(`${line.label}:`, labelX, yy, {
-          size: 9,
-          bold: true,
-          color: colors.muted,
+        write(`${line.label}:`, labelX, yy, { size: 8.5, bold: true, color: C.muted });
+        const h = writeWrapped(line.value || "—", valueX, yy, valueW, {
+          size: 9, color: C.text, lineHeight: 14,
         });
+        yy += Math.max(20, h + 2);
+      }
 
-        const wrappedHeight = writeWrapped(line.value || "—", valueX, yy, valueWidth, {
-          size: 9.2,
-          color: colors.text,
-          lineHeight: 14,
-        });
-
-        yy += Math.max(22, wrappedHeight + 2);
-      });
-
-      y += cardHeight + 14;
+      y += cardH + 12;
     };
+
+    // ════════════════════════════════════════════════════════════════════
+    // PDF aufbauen
+    // ════════════════════════════════════════════════════════════════════
 
     await drawHeader();
 
-    y = 170;
+    // y startet unter Header + Trennlinie
+    y = HEADER_Y + HEADER_H + 14 + 10; // 14 = Trennlinien-H + Abstand
+
+    // ── Zwei Info-Cards nebeneinander ────────────────────────────────────
+    const cardW  = (contentWidth - 12) / 2;
 
     const leftRows = [
-      { label: "Kunde", value: customerName || "—" },
-      { label: "Shipment", value: dnInput || "—" },
-      { label: "Belegnr.", value: documentNumber || "—" },
-      { label: "Auftragsnr.", value: salesOrderNumber || "—" },
+      { label: "Kunde",        value: customerName      || "—" },
+      { label: "Shipment",     value: dnInput           || "—" },
+      { label: "Belegnr.",     value: documentNumber    || "—" },
+      { label: "Auftragsnr.",  value: salesOrderNumber  || "—" },
     ];
-
     const rightRows = [
-      { label: "Gerätetyp", value: deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet" },
-      { label: "Bearbeiter", value: operator || "—" },
-      { label: "Datum", value: nowInfo.date },
-      { label: "Uhrzeit", value: nowInfo.time },
-      { label: "Shipment-ID", value: shipmentId || "—" },
+      { label: "Gerätetyp",   value: deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet" },
+      { label: "Bearbeiter",  value: operator    || "—" },
+      { label: "Datum",       value: nowInfo.date },
+      { label: "Uhrzeit",     value: nowInfo.time },
+      { label: "Shipment-ID", value: shipmentId  || "—" },
     ];
 
-    const cardWidth = (contentWidth - 14) / 2;
-    const leftH = drawInfoCard(margin, y, cardWidth, "Auftragsdaten", leftRows);
-    const rightH = drawInfoCard(margin + cardWidth + 14, y, cardWidth, "Protokoll", rightRows);
+    const leftH  = drawInfoCard(margin,           y, cardW, "Auftragsdaten", leftRows);
+    const rightH = drawInfoCard(margin + cardW + 12, y, cardW, "Protokoll",    rightRows);
 
-    y += Math.max(leftH, rightH) + 18;
+    y += Math.max(leftH, rightH) + 16;
 
+    // ── Produkte (optional) ──────────────────────────────────────────────
     if (relevantPdfProducts.length) {
-      setFill(colors.soft);
-      setDraw(colors.line);
-      doc.roundedRect(margin, y, contentWidth, 62, 16, 16, "FD");
-      write("Produkte", margin + 18, y + 22, {
-        size: 10,
-        bold: true,
-        color: colors.orange,
-      });
+      const prodPad = 14;
+      const prodH   = 58;
+      setF(C.soft);
+      setD(C.line);
+      doc.roundedRect(margin, y, contentWidth, prodH, 14, 14, "FD");
+      write("Produkte", margin + 16, y + 20, { size: 9.5, bold: true, color: C.orange });
 
-      writeWrapped(relevantPdfProducts.join(" • "), margin + 18, y + 44, contentWidth - 36, {
-        size: 10,
-        color: colors.text,
-        lineHeight: 14,
-      });
+      // Trennlinie
+      setD(C.lineDark);
+      doc.setLineWidth(0.4);
+      doc.line(margin + 14, y + 28, margin + contentWidth - 14, y + 28);
+      doc.setLineWidth(0.5);
 
-      y += 78;
+      writeWrapped(relevantPdfProducts.join("  •  "), margin + 16, y + 44, contentWidth - 32, {
+        size: 9.5, color: C.text, lineHeight: 14,
+      });
+      y += prodH + 16;
     }
 
-    write("Fertigungseinheiten", margin, y, {
-      size: 13,
-      bold: true,
-      color: colors.text,
-    });
-
+    // ── Fertigungseinheiten Überschrift ──────────────────────────────────
+    write("Fertigungseinheiten", margin, y, { size: 13, bold: true, color: C.text });
     write(`${rows.length} Gerät(e)`, pageWidth - margin, y, {
-      size: 10,
-      bold: true,
-      color: colors.muted,
-      align: "right",
+      size: 9.5, bold: true, color: C.muted, align: "right",
     });
-
-    y += 16;
-    setDraw(colors.line);
+    y += 12;
+    setD(C.line);
+    doc.setLineWidth(0.5);
     doc.line(margin, y, pageWidth - margin, y);
-    y += 14; // absichtlich knapp, damit kein leerer Bereich entsteht
+    y += 14;
 
-    rows.forEach((r, idx) => drawUnitCard(r, idx));
+    // ── Alle Unit-Cards ──────────────────────────────────────────────────
+    for (let i = 0; i < rows.length; i++) {
+      drawUnitCard(rows[i], i);
+    }
 
-    ensureSpace(126);
+    // ── Abschluss / Freigabe ─────────────────────────────────────────────
+    // Höhe dynamisch: Basisblock + Unterschrift falls vorhanden
+    const sigH = signatureDataUrl ? 80 : 0;
+    const closingH = 120 + sigH;
+    ensureSpace(closingH + 10);
 
-    setFill(colors.soft);
-    setDraw(colors.line);
-    doc.roundedRect(margin, y, contentWidth, 118, 16, 16, "FD");
+    setF(C.soft);
+    setD(C.line);
+    doc.roundedRect(margin, y, contentWidth, closingH, 14, 14, "FD");
 
-    write("Abschluss / Freigabe", margin + 18, y + 22, {
-      size: 11,
-      bold: true,
-      color: colors.orange,
+    write("Abschluss / Freigabe", margin + 16, y + 22, {
+      size: 11, bold: true, color: C.orange,
     });
 
-    write(`Bearbeiter: ${operator || "—"}`, margin + 18, y + 48, {
-      size: 10,
-      bold: true,
-      color: colors.text,
-    });
+    // Trennlinie
+    setD(C.lineDark);
+    doc.setLineWidth(0.4);
+    doc.line(margin + 14, y + 30, margin + contentWidth - 14, y + 30);
+    doc.setLineWidth(0.5);
 
-    write(`Datum: ${nowInfo.date}`, margin + 18, y + 66, {
-      size: 10,
-      color: colors.text,
-    });
+    const infoLeft = [
+      { label: "Bearbeiter", value: operator      || "—" },
+      { label: "Datum",      value: nowInfo.date           },
+      { label: "Uhrzeit",    value: nowInfo.time           },
+      { label: "Kürzel",     value: signatureInitials || "—" },
+    ];
 
-    write(`Uhrzeit: ${nowInfo.time}`, margin + 18, y + 84, {
-      size: 10,
-      color: colors.text,
-    });
+    let yy2 = y + 44;
+    for (const item of infoLeft) {
+      write(`${item.label}:`, margin + 16, yy2, { size: 9, bold: true, color: C.muted });
+      write(item.value, margin + 110, yy2, { size: 9.5, color: C.text });
+      yy2 += 18;
+    }
 
-    write(`Kürzel: ${signatureInitials || "—"}`, margin + 18, y + 102, {
-      size: 10,
-      color: colors.text,
-    });
-
+    // Unterschrift (rechts im Abschluss-Block)
     if (signatureDataUrl) {
       try {
-        doc.addImage(signatureDataUrl, "PNG", pageWidth - margin - 176, y + 24, 156, 64);
+        doc.addImage(
+          signatureDataUrl, "PNG",
+          pageWidth - margin - 180, y + 34,
+          164, 72
+        );
       } catch {
         // ignore
       }
