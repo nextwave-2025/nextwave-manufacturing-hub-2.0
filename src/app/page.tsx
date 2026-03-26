@@ -911,7 +911,7 @@ export default function Page() {
 
 // =====================================================================
 // ERSETZE in page.tsx die komplette Funktion createPdfDoc()
-// von "const createPdfDoc = async (): Promise<jsPDF> => {" 
+// von "const createPdfDoc = async (): Promise<jsPDF> => {"
 // bis zum abschliessenden "};"
 // =====================================================================
 
@@ -926,14 +926,12 @@ export default function Page() {
     // ── Farben ──────────────────────────────────────────────────────────
     const C = {
       orange:   [241, 81, 36]   as const,
-      dark:     [15, 16, 20]    as const,   // tiefschwarz wie im Web-Header
+      dark:     [15, 16, 20]    as const,
       dark2:    [26, 27, 33]    as const,
-      dark3:    [38, 39, 48]    as const,
       text:     [24, 24, 24]    as const,
       muted:    [110, 110, 110] as const,
-      mutedDark:[160, 160, 160] as const,
       line:     [225, 225, 225] as const,
-      lineDark: [210, 210, 210] as const,
+      lineDark: [200, 200, 200] as const,
       soft:     [246, 246, 247] as const,
       soft2:    [240, 240, 242] as const,
       white:    [255, 255, 255] as const,
@@ -941,15 +939,13 @@ export default function Page() {
       greenTxt: [16, 118, 62]   as const,
       redTxt:   [168, 52, 32]   as const,
       shadow:   [210, 210, 212] as const,
-      warmGlow: [100, 32, 12]   as const,   // Glow-Ring im Header
     } as const;
 
     let y = 0;
 
-    // ── Basis-Helfer ────────────────────────────────────────────────────
-    const setT  = (rgb: readonly number[]) => doc.setTextColor(rgb[0], rgb[1], rgb[2]);
-    const setF  = (rgb: readonly number[]) => doc.setFillColor(rgb[0], rgb[1], rgb[2]);
-    const setD  = (rgb: readonly number[]) => doc.setDrawColor(rgb[0], rgb[1], rgb[2]);
+    const setT = (rgb: readonly number[]) => doc.setTextColor(rgb[0], rgb[1], rgb[2]);
+    const setF = (rgb: readonly number[]) => doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+    const setD = (rgb: readonly number[]) => doc.setDrawColor(rgb[0], rgb[1], rgb[2]);
 
     const write = (
       text: string,
@@ -995,7 +991,6 @@ export default function Page() {
       }
     };
 
-    // ── Shadow-Card ─────────────────────────────────────────────────────
     const drawShadowCard = (x: number, cy: number, w: number, h: number, r = 16) => {
       setF(C.shadow);
       doc.roundedRect(x + 2, cy + 3, w, h, r, r, "F");
@@ -1004,124 +999,85 @@ export default function Page() {
       doc.roundedRect(x, cy, w, h, r, r, "FD");
     };
 
-    // ── PREMIUM HEADER  ──────────────────────────────────────────────────
-    // Ziel: identisch zum SaaS-Header
-    //   • Tiefschwarzer Hintergrund (kein Grauton)
-    //   • Warmer orangeroter Glow-Blob links
-    //   • Logo links, Titel/Infos rechts
-    //   • Orangefarbene Trennlinie unten
-    // ────────────────────────────────────────────────────────────────────
-    const HEADER_H    = 148;
-    const HEADER_Y    = 10;
-    const HEADER_R    = 20;
+    // ════════════════════════════════════════════════════════════════════
+    // HEADER – KEIN LOGO, nur Glow-Blob + Text rechts
+    // ════════════════════════════════════════════════════════════════════
+    const HEADER_H = 148;
+    const HEADER_Y = 10;
+    const HEADER_R = 20;
 
     const drawHeader = async () => {
-      // ── 1. Schatten-Schicht (leicht versetzt, sehr weich) ──
+      // Schatten
       setF([195, 195, 197]);
       doc.roundedRect(14, HEADER_Y + 5, pageWidth - 28, HEADER_H, HEADER_R, HEADER_R, "F");
 
-      // ── 2. Haupt-Background ──
+      // Haupthintergrund
       setF(C.dark);
       doc.roundedRect(12, HEADER_Y, pageWidth - 24, HEADER_H, HEADER_R, HEADER_R, "F");
 
-      // ── 3. Warmer Glow-Blob (links, simuliert den CSS-blur im Web) ──
-      //    Da jsPDF kein Blur kennt, layern wir 4 abnehmende Circles
-      //    mit steigendem Alpha von innen nach aussen
-      const glowCx = 80;
-      const glowCy = HEADER_Y + HEADER_H / 2 + 4;
+      // Warmer Glow links (4 Schichten für weichen Übergang)
+      const gx = 90;
+      const gy = HEADER_Y + HEADER_H / 2 + 4;
       const glowLayers: Array<[number, number]> = [
-        [90, 0.55],
-        [64, 0.40],
-        [42, 0.28],
-        [24, 0.18],
+        [95, 0.50],
+        [68, 0.36],
+        [44, 0.24],
+        [26, 0.16],
       ];
-      for (const [radius, alpha] of glowLayers) {
+      for (const [r, a] of glowLayers) {
         doc.setFillColor(
-          Math.round(C.orange[0] * alpha + C.dark[0] * (1 - alpha)),
-          Math.round(C.orange[1] * alpha + C.dark[1] * (1 - alpha)),
-          Math.round(C.orange[2] * alpha + C.dark[2] * (1 - alpha))
+          Math.round(C.orange[0] * a + C.dark[0] * (1 - a)),
+          Math.round(C.orange[1] * a + C.dark[1] * (1 - a)),
+          Math.round(C.orange[2] * a + C.dark[2] * (1 - a))
         );
-        doc.circle(glowCx, glowCy, radius, "F");
+        doc.circle(gx, gy, r, "F");
       }
-      // Innerer Kern
-      setF([220, 65, 28]);
-      doc.circle(glowCx, glowCy, 16, "F");
+      // Innerer heller Kern
+      setF([215, 62, 24]);
+      doc.circle(gx, gy, 18, "F");
 
-      // ── 4. Rechts: subtiler weisslicher Schimmer (wie im Web) ──
-      const rightGlowX = pageWidth - 60;
-      const rgLayers: Array<[number, number]> = [
-        [100, 0.04],
-        [70,  0.06],
-        [44,  0.04],
-      ];
-      for (const [radius, alpha] of rgLayers) {
+      // Subtiler weisslicher Schimmer rechts
+      for (const [r, a] of [[100, 0.04], [68, 0.06], [40, 0.04]] as [number, number][]) {
         doc.setFillColor(
-          Math.round(255 * alpha + C.dark[0] * (1 - alpha)),
-          Math.round(255 * alpha + C.dark[1] * (1 - alpha)),
-          Math.round(255 * alpha + C.dark[2] * (1 - alpha))
+          Math.round(255 * a + C.dark[0] * (1 - a)),
+          Math.round(255 * a + C.dark[1] * (1 - a)),
+          Math.round(255 * a + C.dark[2] * (1 - a))
         );
-        doc.circle(rightGlowX, glowCy, radius, "F");
+        doc.circle(pageWidth - 60, gy, r, "F");
       }
 
-      // ── 5. Logo ──
-      const logoY  = HEADER_Y + 20;
-      const logoH  = 48;
-      const logoW  = 200; // Seitenverhältnis ca. 4.1:1 (typisch)
-      try {
-        const logoDataUrl = await loadImageAsDataUrl("/nextwave-logo-light.png");
-        doc.addImage(logoDataUrl, "PNG", 30, logoY, logoW, logoH);
-      } catch {
-        write("NEXTWAVE", 34, logoY + 32, { size: 26, bold: true, color: C.white });
-      }
-
-      // ── 6. Rechte Seite: Titel, Subtitle, Claim ──
+      // ── Rechts: Titel-Block ──────────────────────────────────────────
       const rx = pageWidth - 36;
 
       write("NEXTWAVE Manufacturing Hub 2.0", rx, HEADER_Y + 42, {
-        size: 19,
-        bold: true,
-        color: C.orange,
-        align: "right",
+        size: 19, bold: true, color: C.orange, align: "right",
       });
-
       write("Fertigungsprotokoll", rx, HEADER_Y + 68, {
-        size: 13.5,
-        bold: true,
-        color: C.white,
-        align: "right",
+        size: 13.5, bold: true, color: C.white, align: "right",
       });
-
       write("NEXTWAVE GmbH – Premium Manufacturing Documentation", rx, HEADER_Y + 90, {
-        size: 8.5,
-        color: [210, 210, 210],
-        align: "right",
+        size: 8.5, color: [210, 210, 210], align: "right",
       });
-
-      // ── 7. Copyright-Zeile (analog zum Web-Header) ──
       write("© NEXTWAVE GmbH – All rights reserved 2026", rx, HEADER_Y + 108, {
-        size: 7.5,
-        color: [160, 160, 160],
-        align: "right",
+        size: 7.5, color: [160, 160, 160], align: "right",
       });
 
-      // ── 8. Trennlinie orange (wie im Web) ──
+      // Orangefarbene Trennlinie
       const lineY = HEADER_Y + HEADER_H + 4;
       setF(C.orange);
       doc.roundedRect(12, lineY, pageWidth - 24, 6, 3, 3, "F");
     };
 
-    // ── Info-Card Höhenberechnung ────────────────────────────────────────
+    // ── Info-Card ────────────────────────────────────────────────────────
     const measureInfoCardH = (w: number, rows: Array<{ label: string; value: string }>) => {
-      let h = 44; // Header-Bereich (Titel + Padding)
+      let h = 44;
       for (const row of rows) {
         const lines = doc.splitTextToSize(row.value || "—", w - 130);
         h += Math.max(20, lines.length * 14);
       }
-      h += 12; // Bottom-Padding
-      return h;
+      return h + 12;
     };
 
-    // ── Info-Card zeichnen ───────────────────────────────────────────────
     const drawInfoCard = (
       cx: number,
       cy: number,
@@ -1130,36 +1086,29 @@ export default function Page() {
       rows: Array<{ label: string; value: string }>
     ): number => {
       const cardH = measureInfoCardH(w, rows);
-
-      // Soft Background
       setF(C.soft);
       setD(C.line);
       doc.roundedRect(cx, cy, w, cardH, 14, 14, "FD");
 
-      // Titel
       write(title, cx + 16, cy + 20, { size: 9.5, bold: true, color: C.orange });
 
-      // Horizontale Trennlinie unter Titel
       setD(C.lineDark);
       doc.setLineWidth(0.4);
       doc.line(cx + 14, cy + 28, cx + w - 14, cy + 28);
-      doc.setLineWidth(0.5); // reset
+      doc.setLineWidth(0.5);
 
       let yy = cy + 44;
       for (const row of rows) {
         write(`${row.label}:`, cx + 16, yy, { size: 8.5, bold: true, color: C.muted });
-
         const h = writeWrapped(row.value || "—", cx + 120, yy, w - 136, {
-          size: 9,
-          color: C.text,
-          lineHeight: 14,
+          size: 9, color: C.text, lineHeight: 14,
         });
         yy += Math.max(20, h + 2);
       }
       return cardH;
     };
 
-    // ── Zeilen für Unit-Card ─────────────────────────────────────────────
+    // ── Unit-Card Helfer ─────────────────────────────────────────────────
     const getFieldValueLabel = (r: Row, f: FieldDef): string => {
       const v: any = (r as any)[f.key];
       if (f.type === "yn")      return ynLabel((v as Yn) ?? "unset");
@@ -1187,19 +1136,26 @@ export default function Page() {
       return lines;
     };
 
+    // FIX 1: valueX deutlich weiter rechts, valueW schmaler
+    // Damit "Ja"/"Nein" nicht mit den Fragen überlappt
+    const LABEL_X_OFFSET = 16;   // Abstand von Card-Links zur Beschriftung
+    const VALUE_X_OFFSET = 230;  // Wert startet erst bei 230pt → genug Luft
+    const VALUE_W_REDUCTION = 246; // contentWidth - diese Zahl = Wertbreite
+
     const estimateUnitH = (r: Row): number => {
       const lines = getVisibleLines(r);
-      let h = 72; // Header-Zeile + Status-Chips
+      let h = 72;
       for (const line of lines) {
         if (line.isSection) { h += 28; continue; }
-        const wrapped = doc.splitTextToSize(line.value || "—", contentWidth - 180);
+        const wrapped = doc.splitTextToSize(
+          line.value || "—",
+          contentWidth - VALUE_W_REDUCTION
+        );
         h += Math.max(20, wrapped.length * 14 + 2);
       }
-      h += 12;
-      return h;
+      return h + 12;
     };
 
-    // ── Unit-Card ────────────────────────────────────────────────────────
     const drawUnitCard = (r: Row, idx: number) => {
       const cardH = estimateUnitH(r);
       ensureSpace(cardH);
@@ -1207,51 +1163,48 @@ export default function Page() {
       drawShadowCard(margin, y, contentWidth, cardH, 16);
 
       // Dunkler Header-Streifen
-      const UNIT_HEADER_H = 38;
+      const UNIT_H = 38;
       setF(C.dark2);
-      doc.roundedRect(margin, y, contentWidth, UNIT_HEADER_H, 16, 16, "F");
-      // Ecken unten quadratisch machen (Trick: ein Rect darüber)
-      doc.rect(margin, y + UNIT_HEADER_H - 16, contentWidth, 16, "F");
+      doc.roundedRect(margin, y, contentWidth, UNIT_H, 16, 16, "F");
+      doc.rect(margin, y + UNIT_H - 16, contentWidth, 16, "F");
 
-      // Nummer + S/N
       write(`${idx + 1}.`, margin + 14, y + 24, { size: 9, bold: true, color: C.orange });
-      write("Seriennummer", margin + 30, y + 24, { size: 9, bold: false, color: [190, 190, 190] });
+      write("Seriennummer", margin + 30, y + 24, { size: 9, color: [190, 190, 190] });
       write(r.sn, pageWidth - margin - 14, y + 24, {
         size: 10.5, bold: true, color: C.white, align: "right",
       });
 
       // Status-Chips
-      let yy = y + UNIT_HEADER_H + 14;
-
-      // Chip "Scan"
+      let yy = y + UNIT_H + 14;
       const scanOk = r.confirmed;
       setF(scanOk ? C.greenBg : C.soft2);
-      setD(scanOk ? [180, 230, 200] : C.line);
+      setD(scanOk ? [180, 230, 200] as const : C.line);
       doc.roundedRect(margin + 14, yy - 10, 162, 22, 10, 10, "FD");
-      write(scanOk ? "✓  Scan durchgeführt" : "–  Scan ausstehend", margin + 26, yy + 3, {
-        size: 8.5, bold: true, color: scanOk ? C.greenTxt : C.muted,
-      });
+      write(
+        scanOk ? "Scan durchgefuhrt" : "Scan ausstehend",
+        margin + 26, yy + 3,
+        { size: 8.5, bold: true, color: scanOk ? C.greenTxt : C.muted }
+      );
 
-      // Chip "Status"
       const done = isRowComplete(r);
       setF(done ? C.greenBg : C.soft2);
-      setD(done ? [180, 230, 200] : C.line);
+      setD(done ? [180, 230, 200] as const : C.line);
       doc.roundedRect(pageWidth - margin - 178, yy - 10, 162, 22, 10, 10, "FD");
-      write(done ? "✓  Status: Fertig" : "○  Status: Offen",
-        pageWidth - margin - 178 + 81, yy + 3, {
-          size: 8.5, bold: true, color: done ? C.greenTxt : C.muted, align: "center",
-        });
+      write(
+        done ? "Status: Fertig" : "Status: Offen",
+        pageWidth - margin - 178 + 81, yy + 3,
+        { size: 8.5, bold: true, color: done ? C.greenTxt : C.muted, align: "center" }
+      );
 
       yy += 28;
 
-      // Felder
-      const labelX = margin + 16;
-      const valueX = margin + 152;
-      const valueW = contentWidth - 168;
+      // Felder mit fix verbreiterter Werte-Spalte
+      const labelX = margin + LABEL_X_OFFSET;
+      const valueX = margin + VALUE_X_OFFSET;
+      const valueW = contentWidth - VALUE_W_REDUCTION;
 
       for (const line of getVisibleLines(r)) {
         if (line.isSection) {
-          // Section-Divider
           setF(C.soft2);
           setD(C.line);
           doc.roundedRect(margin + 12, yy - 9, contentWidth - 24, 20, 10, 10, "FD");
@@ -1271,58 +1224,50 @@ export default function Page() {
     };
 
     // ════════════════════════════════════════════════════════════════════
-    // PDF aufbauen
+    // PDF AUFBAUEN
     // ════════════════════════════════════════════════════════════════════
 
     await drawHeader();
+    y = HEADER_Y + HEADER_H + 14 + 10;
 
-    // y startet unter Header + Trennlinie
-    y = HEADER_Y + HEADER_H + 14 + 10; // 14 = Trennlinien-H + Abstand
-
-    // ── Zwei Info-Cards nebeneinander ────────────────────────────────────
-    const cardW  = (contentWidth - 12) / 2;
-
+    // Info-Cards
+    const cardW = (contentWidth - 12) / 2;
     const leftRows = [
-      { label: "Kunde",        value: customerName      || "—" },
-      { label: "Shipment",     value: dnInput           || "—" },
-      { label: "Belegnr.",     value: documentNumber    || "—" },
-      { label: "Auftragsnr.",  value: salesOrderNumber  || "—" },
+      { label: "Kunde",       value: customerName     || "—" },
+      { label: "Shipment",    value: dnInput          || "—" },
+      { label: "Belegnr.",    value: documentNumber   || "—" },
+      { label: "Auftragsnr.", value: salesOrderNumber || "—" },
     ];
     const rightRows = [
-      { label: "Gerätetyp",   value: deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet" },
-      { label: "Bearbeiter",  value: operator    || "—" },
-      { label: "Datum",       value: nowInfo.date },
-      { label: "Uhrzeit",     value: nowInfo.time },
-      { label: "Shipment-ID", value: shipmentId  || "—" },
+      { label: "Gerätetyp",  value: deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet" },
+      { label: "Bearbeiter", value: operator   || "—" },
+      { label: "Datum",      value: nowInfo.date },
+      { label: "Uhrzeit",    value: nowInfo.time },
+      { label: "Shipment-ID",value: shipmentId || "—" },
     ];
 
-    const leftH  = drawInfoCard(margin,           y, cardW, "Auftragsdaten", leftRows);
-    const rightH = drawInfoCard(margin + cardW + 12, y, cardW, "Protokoll",    rightRows);
-
+    const leftH  = drawInfoCard(margin,              y, cardW, "Auftragsdaten", leftRows);
+    const rightH = drawInfoCard(margin + cardW + 12, y, cardW, "Protokoll",     rightRows);
     y += Math.max(leftH, rightH) + 16;
 
-    // ── Produkte (optional) ──────────────────────────────────────────────
+    // Produkte
     if (relevantPdfProducts.length) {
-      const prodPad = 14;
-      const prodH   = 58;
       setF(C.soft);
       setD(C.line);
-      doc.roundedRect(margin, y, contentWidth, prodH, 14, 14, "FD");
+      doc.roundedRect(margin, y, contentWidth, 58, 14, 14, "FD");
       write("Produkte", margin + 16, y + 20, { size: 9.5, bold: true, color: C.orange });
-
-      // Trennlinie
       setD(C.lineDark);
       doc.setLineWidth(0.4);
       doc.line(margin + 14, y + 28, margin + contentWidth - 14, y + 28);
       doc.setLineWidth(0.5);
-
       writeWrapped(relevantPdfProducts.join("  •  "), margin + 16, y + 44, contentWidth - 32, {
         size: 9.5, color: C.text, lineHeight: 14,
       });
-      y += prodH + 16;
+      // FIX 2: Mehr Abstand nach Produkte-Card
+      y += 58 + 24;
     }
 
-    // ── Fertigungseinheiten Überschrift ──────────────────────────────────
+    // FIX 3: Fertigungseinheiten-Überschrift
     write("Fertigungseinheiten", margin, y, { size: 13, bold: true, color: C.text });
     write(`${rows.length} Gerät(e)`, pageWidth - margin, y, {
       size: 9.5, bold: true, color: C.muted, align: "right",
@@ -1331,16 +1276,16 @@ export default function Page() {
     setD(C.line);
     doc.setLineWidth(0.5);
     doc.line(margin, y, pageWidth - margin, y);
-    y += 14;
+    // FIX 4: Direkt danach Unit-Cards starten, kein grosser Gap
+    y += 12;
 
-    // ── Alle Unit-Cards ──────────────────────────────────────────────────
+    // Unit-Cards – beginnen sofort auf Seite 1
     for (let i = 0; i < rows.length; i++) {
       drawUnitCard(rows[i], i);
     }
 
-    // ── Abschluss / Freigabe ─────────────────────────────────────────────
-    // Höhe dynamisch: Basisblock + Unterschrift falls vorhanden
-    const sigH = signatureDataUrl ? 80 : 0;
+    // Abschluss / Freigabe
+    const sigH     = signatureDataUrl ? 80 : 0;
     const closingH = 120 + sigH;
     ensureSpace(closingH + 10);
 
@@ -1351,38 +1296,27 @@ export default function Page() {
     write("Abschluss / Freigabe", margin + 16, y + 22, {
       size: 11, bold: true, color: C.orange,
     });
-
-    // Trennlinie
     setD(C.lineDark);
     doc.setLineWidth(0.4);
     doc.line(margin + 14, y + 30, margin + contentWidth - 14, y + 30);
     doc.setLineWidth(0.5);
 
-    const infoLeft = [
-      { label: "Bearbeiter", value: operator      || "—" },
-      { label: "Datum",      value: nowInfo.date           },
-      { label: "Uhrzeit",    value: nowInfo.time           },
-      { label: "Kürzel",     value: signatureInitials || "—" },
-    ];
-
     let yy2 = y + 44;
-    for (const item of infoLeft) {
+    for (const item of [
+      { label: "Bearbeiter", value: operator           || "—" },
+      { label: "Datum",      value: nowInfo.date                },
+      { label: "Uhrzeit",    value: nowInfo.time                },
+      { label: "Kürzel",     value: signatureInitials  || "—" },
+    ]) {
       write(`${item.label}:`, margin + 16, yy2, { size: 9, bold: true, color: C.muted });
       write(item.value, margin + 110, yy2, { size: 9.5, color: C.text });
       yy2 += 18;
     }
 
-    // Unterschrift (rechts im Abschluss-Block)
     if (signatureDataUrl) {
       try {
-        doc.addImage(
-          signatureDataUrl, "PNG",
-          pageWidth - margin - 180, y + 34,
-          164, 72
-        );
-      } catch {
-        // ignore
-      }
+        doc.addImage(signatureDataUrl, "PNG", pageWidth - margin - 180, y + 34, 164, 72);
+      } catch { /* ignore */ }
     }
 
     return doc;
