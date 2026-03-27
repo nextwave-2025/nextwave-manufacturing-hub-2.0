@@ -918,12 +918,11 @@ export default function Page() {
   const createPdfDoc = async (): Promise<jsPDF> => {
     const doc = new jsPDF({ unit: "pt", format: "a4" });
 
-    const pageWidth  = 595.28;
-    const pageHeight = 841.89;
-    const margin     = 36;
+    const pageWidth    = 595.28;
+    const pageHeight   = 841.89;
+    const margin       = 36;
     const contentWidth = pageWidth - margin * 2;
 
-    // ── Farben ──────────────────────────────────────────────────────────
     const C = {
       orange:   [241, 81, 36]   as const,
       dark:     [15, 16, 20]    as const,
@@ -937,7 +936,6 @@ export default function Page() {
       white:    [255, 255, 255] as const,
       greenBg:  [235, 248, 240] as const,
       greenTxt: [16, 118, 62]   as const,
-      redTxt:   [168, 52, 32]   as const,
       shadow:   [210, 210, 212] as const,
     } as const;
 
@@ -984,6 +982,7 @@ export default function Page() {
       return lines.length * (opts?.lineHeight ?? 14);
     };
 
+    // ensureSpace nur für Nicht-Unit-Elemente (Abschluss-Block etc.)
     const ensureSpace = (needed: number) => {
       if (y + needed > pageHeight - 50) {
         doc.addPage();
@@ -1000,29 +999,43 @@ export default function Page() {
     };
 
     // ════════════════════════════════════════════════════════════════════
-    // HEADER – KEIN LOGO, nur Glow-Blob + Text rechts
+    // HEADER
+    // Glow-Circles werden NUR innerhalb des Header-Rechtecks gezeichnet.
+    // jsPDF hat kein natives Clipping, daher zeichnen wir die Circles
+    // so klein und so positioniert, dass sie die Bounds nicht verlassen,
+    // und überdecken den Rand danach mit dem Header-Outline.
     // ════════════════════════════════════════════════════════════════════
     const HEADER_H = 148;
     const HEADER_Y = 10;
     const HEADER_R = 20;
+    const HEADER_X = 12;
+    const HEADER_W = pageWidth - 24;
 
     const drawHeader = async () => {
-      // Schatten
-      setF([195, 195, 197]);
-      doc.roundedRect(14, HEADER_Y + 5, pageWidth - 28, HEADER_H, HEADER_R, HEADER_R, "F");
+      // 1. Schatten
+      setF([192, 192, 194]);
+      doc.roundedRect(HEADER_X + 2, HEADER_Y + 5, HEADER_W, HEADER_H, HEADER_R, HEADER_R, "F");
 
-      // Haupthintergrund
+      // 2. Haupthintergrund (komplett dunkel, kein Glow ausserhalb)
       setF(C.dark);
-      doc.roundedRect(12, HEADER_Y, pageWidth - 24, HEADER_H, HEADER_R, HEADER_R, "F");
+      doc.roundedRect(HEADER_X, HEADER_Y, HEADER_W, HEADER_H, HEADER_R, HEADER_R, "F");
 
-      // Warmer Glow links (4 Schichten für weichen Übergang)
-      const gx = 90;
-      const gy = HEADER_Y + HEADER_H / 2 + 4;
+      // 3. Warmer Glow – NUR als gefüllte abgestufte Kreise LINKS
+      //    Mittelpunkt so gewählt, dass alle Kreise innerhalb des Rects bleiben.
+      //    Max-Radius = min(cx - HEADER_X, HEADER_Y + HEADER_H - cy, cy - HEADER_Y)
+      //    Wir wählen cx=68, cy=Mitte → max safe radius ≈ 56
+      const gx = 72;
+      const gy = HEADER_Y + HEADER_H / 2;  // vertikal mittig
+      // Layered circles – radii und alphas so, dass alles gut innerhalb bleibt
+      // Größter Radius: gx - HEADER_X - 4 = 72 - 12 - 4 = 56 (links-sicher)
+      //                 HEADER_Y + HEADER_H - gy - 4 = 10+148 - 84 - 4 = 70 (unten-sicher)
+      //                 gy - HEADER_Y - 4 = 84 - 10 - 4 = 70 (oben-sicher)
+      // → max safe radius = 56
       const glowLayers: Array<[number, number]> = [
-        [95, 0.50],
-        [68, 0.36],
-        [44, 0.24],
-        [26, 0.16],
+        [54, 0.45],
+        [38, 0.35],
+        [24, 0.25],
+        [13, 0.18],
       ];
       for (const [r, a] of glowLayers) {
         doc.setFillColor(
@@ -1032,40 +1045,42 @@ export default function Page() {
         );
         doc.circle(gx, gy, r, "F");
       }
-      // Innerer heller Kern
-      setF([215, 62, 24]);
-      doc.circle(gx, gy, 18, "F");
+      // Innerster heller Kern
+      setF([210, 58, 20]);
+      doc.circle(gx, gy, 7, "F");
 
-      // Subtiler weisslicher Schimmer rechts
-      for (const [r, a] of [[100, 0.04], [68, 0.06], [40, 0.04]] as [number, number][]) {
-        doc.setFillColor(
-          Math.round(255 * a + C.dark[0] * (1 - a)),
-          Math.round(255 * a + C.dark[1] * (1 - a)),
-          Math.round(255 * a + C.dark[2] * (1 - a))
-        );
-        doc.circle(pageWidth - 60, gy, r, "F");
-      }
+      // 4. Rechte Seite: KEIN Glow-Circle mehr (war das Problem)
+      //    Stattdessen: leicht aufgehellter dunkler Block (Rectangle) für Tiefe
+      setF(C.dark2);
+      doc.roundedRect(pageWidth - 160, HEADER_Y, 148, HEADER_H, HEADER_R, HEADER_R, "F");
+      // Naht schliessen (der rechte Kreis hat links eine scharfe Kante)
+      doc.rect(pageWidth - 160, HEADER_Y, 20, HEADER_H, "F");
 
-      // ── Rechts: Titel-Block ──────────────────────────────────────────
+      // 5. Header-Outline nochmals drüber – deckt alle Circle-Kanten ab
+      setD([40, 40, 45]);
+      doc.setLineWidth(2.5);
+      doc.roundedRect(HEADER_X, HEADER_Y, HEADER_W, HEADER_H, HEADER_R, HEADER_R, "S");
+      doc.setLineWidth(0.5);
+
+      // 6. Titeltext rechts
       const rx = pageWidth - 36;
-
-      write("NEXTWAVE Manufacturing Hub 2.0", rx, HEADER_Y + 42, {
+      write("NEXTWAVE Manufacturing Hub 2.0", rx, HEADER_Y + 44, {
         size: 19, bold: true, color: C.orange, align: "right",
       });
-      write("Fertigungsprotokoll", rx, HEADER_Y + 68, {
+      write("Fertigungsprotokoll", rx, HEADER_Y + 70, {
         size: 13.5, bold: true, color: C.white, align: "right",
       });
-      write("NEXTWAVE GmbH – Premium Manufacturing Documentation", rx, HEADER_Y + 90, {
+      write("NEXTWAVE GmbH – Premium Manufacturing Documentation", rx, HEADER_Y + 92, {
         size: 8.5, color: [210, 210, 210], align: "right",
       });
-      write("© NEXTWAVE GmbH – All rights reserved 2026", rx, HEADER_Y + 108, {
-        size: 7.5, color: [160, 160, 160], align: "right",
+      write("© NEXTWAVE GmbH – All rights reserved 2026", rx, HEADER_Y + 110, {
+        size: 7.5, color: [155, 155, 155], align: "right",
       });
 
-      // Orangefarbene Trennlinie
+      // 7. Orange Trennlinie unten
       const lineY = HEADER_Y + HEADER_H + 4;
       setF(C.orange);
-      doc.roundedRect(12, lineY, pageWidth - 24, 6, 3, 3, "F");
+      doc.roundedRect(HEADER_X, lineY, HEADER_W, 6, 3, 3, "F");
     };
 
     // ── Info-Card ────────────────────────────────────────────────────────
@@ -1079,24 +1094,17 @@ export default function Page() {
     };
 
     const drawInfoCard = (
-      cx: number,
-      cy: number,
-      w: number,
+      cx: number, cy: number, w: number,
       title: string,
       rows: Array<{ label: string; value: string }>
     ): number => {
       const cardH = measureInfoCardH(w, rows);
-      setF(C.soft);
-      setD(C.line);
+      setF(C.soft); setD(C.line);
       doc.roundedRect(cx, cy, w, cardH, 14, 14, "FD");
-
       write(title, cx + 16, cy + 20, { size: 9.5, bold: true, color: C.orange });
-
-      setD(C.lineDark);
-      doc.setLineWidth(0.4);
+      setD(C.lineDark); doc.setLineWidth(0.4);
       doc.line(cx + 14, cy + 28, cx + w - 14, cy + 28);
       doc.setLineWidth(0.5);
-
       let yy = cy + 44;
       for (const row of rows) {
         write(`${row.label}:`, cx + 16, yy, { size: 8.5, bold: true, color: C.muted });
@@ -1108,7 +1116,7 @@ export default function Page() {
       return cardH;
     };
 
-    // ── Unit-Card Helfer ─────────────────────────────────────────────────
+    // ── Unit-Card ────────────────────────────────────────────────────────
     const getFieldValueLabel = (r: Row, f: FieldDef): string => {
       const v: any = (r as any)[f.key];
       if (f.type === "yn")      return ynLabel((v as Yn) ?? "unset");
@@ -1136,21 +1144,15 @@ export default function Page() {
       return lines;
     };
 
-    // FIX 1: valueX deutlich weiter rechts, valueW schmaler
-    // Damit "Ja"/"Nein" nicht mit den Fragen überlappt
-    const LABEL_X_OFFSET = 16;   // Abstand von Card-Links zur Beschriftung
-    const VALUE_X_OFFSET = 230;  // Wert startet erst bei 230pt → genug Luft
-    const VALUE_W_REDUCTION = 246; // contentWidth - diese Zahl = Wertbreite
+    const VALUE_X_OFFSET   = 230;
+    const VALUE_W_SUBTRACT = 246;
 
     const estimateUnitH = (r: Row): number => {
       const lines = getVisibleLines(r);
       let h = 72;
       for (const line of lines) {
         if (line.isSection) { h += 28; continue; }
-        const wrapped = doc.splitTextToSize(
-          line.value || "—",
-          contentWidth - VALUE_W_REDUCTION
-        );
+        const wrapped = doc.splitTextToSize(line.value || "—", contentWidth - VALUE_W_SUBTRACT);
         h += Math.max(20, wrapped.length * 14 + 2);
       }
       return h + 12;
@@ -1158,11 +1160,17 @@ export default function Page() {
 
     const drawUnitCard = (r: Row, idx: number) => {
       const cardH = estimateUnitH(r);
-      ensureSpace(cardH);
+
+      // FIX: Seitenumbruch-Check MIT der tatsächlichen Card-Höhe
+      // Aber: Nur umbrechen wenn wirklich zu wenig Platz (mind. 80pt Minimum)
+      const remainingSpace = pageHeight - 50 - y;
+      if (remainingSpace < Math.min(cardH, 120)) {
+        doc.addPage();
+        y = 44;
+      }
 
       drawShadowCard(margin, y, contentWidth, cardH, 16);
 
-      // Dunkler Header-Streifen
       const UNIT_H = 38;
       setF(C.dark2);
       doc.roundedRect(margin, y, contentWidth, UNIT_H, 16, 16, "F");
@@ -1174,8 +1182,8 @@ export default function Page() {
         size: 10.5, bold: true, color: C.white, align: "right",
       });
 
-      // Status-Chips
       let yy = y + UNIT_H + 14;
+
       const scanOk = r.confirmed;
       setF(scanOk ? C.greenBg : C.soft2);
       setD(scanOk ? [180, 230, 200] as const : C.line);
@@ -1198,21 +1206,18 @@ export default function Page() {
 
       yy += 28;
 
-      // Felder mit fix verbreiterter Werte-Spalte
-      const labelX = margin + LABEL_X_OFFSET;
+      const labelX = margin + 16;
       const valueX = margin + VALUE_X_OFFSET;
-      const valueW = contentWidth - VALUE_W_REDUCTION;
+      const valueW = contentWidth - VALUE_W_SUBTRACT;
 
       for (const line of getVisibleLines(r)) {
         if (line.isSection) {
-          setF(C.soft2);
-          setD(C.line);
+          setF(C.soft2); setD(C.line);
           doc.roundedRect(margin + 12, yy - 9, contentWidth - 24, 20, 10, 10, "FD");
           write(line.label, margin + 26, yy + 3, { size: 8.5, bold: true, color: C.orange });
           yy += 28;
           continue;
         }
-
         write(`${line.label}:`, labelX, yy, { size: 8.5, bold: true, color: C.muted });
         const h = writeWrapped(line.value || "—", valueX, yy, valueW, {
           size: 9, color: C.text, lineHeight: 14,
@@ -1230,7 +1235,6 @@ export default function Page() {
     await drawHeader();
     y = HEADER_Y + HEADER_H + 14 + 10;
 
-    // Info-Cards
     const cardW = (contentWidth - 12) / 2;
     const leftRows = [
       { label: "Kunde",       value: customerName     || "—" },
@@ -1239,47 +1243,42 @@ export default function Page() {
       { label: "Auftragsnr.", value: salesOrderNumber || "—" },
     ];
     const rightRows = [
-      { label: "Gerätetyp",  value: deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet" },
-      { label: "Bearbeiter", value: operator   || "—" },
-      { label: "Datum",      value: nowInfo.date },
-      { label: "Uhrzeit",    value: nowInfo.time },
-      { label: "Shipment-ID",value: shipmentId || "—" },
+      { label: "Gerätetyp",   value: deviceType === "mini" ? "Barebone Mini-PC" : "Rugged Tablet" },
+      { label: "Bearbeiter",  value: operator    || "—" },
+      { label: "Datum",       value: nowInfo.date },
+      { label: "Uhrzeit",     value: nowInfo.time },
+      { label: "Shipment-ID", value: shipmentId  || "—" },
     ];
 
     const leftH  = drawInfoCard(margin,              y, cardW, "Auftragsdaten", leftRows);
     const rightH = drawInfoCard(margin + cardW + 12, y, cardW, "Protokoll",     rightRows);
     y += Math.max(leftH, rightH) + 16;
 
-    // Produkte
+    // Produkte-Card
     if (relevantPdfProducts.length) {
-      setF(C.soft);
-      setD(C.line);
+      setF(C.soft); setD(C.line);
       doc.roundedRect(margin, y, contentWidth, 58, 14, 14, "FD");
       write("Produkte", margin + 16, y + 20, { size: 9.5, bold: true, color: C.orange });
-      setD(C.lineDark);
-      doc.setLineWidth(0.4);
+      setD(C.lineDark); doc.setLineWidth(0.4);
       doc.line(margin + 14, y + 28, margin + contentWidth - 14, y + 28);
       doc.setLineWidth(0.5);
       writeWrapped(relevantPdfProducts.join("  •  "), margin + 16, y + 44, contentWidth - 32, {
         size: 9.5, color: C.text, lineHeight: 14,
       });
-      // FIX 2: Mehr Abstand nach Produkte-Card
-      y += 58 + 24;
+      y += 58 + 24; // grosszügiger Abstand
     }
 
-    // FIX 3: Fertigungseinheiten-Überschrift
+    // Fertigungseinheiten Überschrift
     write("Fertigungseinheiten", margin, y, { size: 13, bold: true, color: C.text });
     write(`${rows.length} Gerät(e)`, pageWidth - margin, y, {
       size: 9.5, bold: true, color: C.muted, align: "right",
     });
-    y += 12;
-    setD(C.line);
-    doc.setLineWidth(0.5);
+    y += 10;
+    setD(C.line); doc.setLineWidth(0.5);
     doc.line(margin, y, pageWidth - margin, y);
-    // FIX 4: Direkt danach Unit-Cards starten, kein grosser Gap
-    y += 12;
+    y += 14; // direkt rein in die Cards
 
-    // Unit-Cards – beginnen sofort auf Seite 1
+    // Unit-Cards
     for (let i = 0; i < rows.length; i++) {
       drawUnitCard(rows[i], i);
     }
@@ -1289,24 +1288,21 @@ export default function Page() {
     const closingH = 120 + sigH;
     ensureSpace(closingH + 10);
 
-    setF(C.soft);
-    setD(C.line);
+    setF(C.soft); setD(C.line);
     doc.roundedRect(margin, y, contentWidth, closingH, 14, 14, "FD");
-
     write("Abschluss / Freigabe", margin + 16, y + 22, {
       size: 11, bold: true, color: C.orange,
     });
-    setD(C.lineDark);
-    doc.setLineWidth(0.4);
+    setD(C.lineDark); doc.setLineWidth(0.4);
     doc.line(margin + 14, y + 30, margin + contentWidth - 14, y + 30);
     doc.setLineWidth(0.5);
 
     let yy2 = y + 44;
     for (const item of [
-      { label: "Bearbeiter", value: operator           || "—" },
-      { label: "Datum",      value: nowInfo.date                },
-      { label: "Uhrzeit",    value: nowInfo.time                },
-      { label: "Kürzel",     value: signatureInitials  || "—" },
+      { label: "Bearbeiter", value: operator          || "—" },
+      { label: "Datum",      value: nowInfo.date               },
+      { label: "Uhrzeit",    value: nowInfo.time               },
+      { label: "Kürzel",     value: signatureInitials || "—" },
     ]) {
       write(`${item.label}:`, margin + 16, yy2, { size: 9, bold: true, color: C.muted });
       write(item.value, margin + 110, yy2, { size: 9.5, color: C.text });
