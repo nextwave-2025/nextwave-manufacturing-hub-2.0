@@ -982,7 +982,6 @@ export default function Page() {
       return lines.length * (opts?.lineHeight ?? 14);
     };
 
-    // ensureSpace nur für Nicht-Unit-Elemente (Abschluss-Block etc.)
     const ensureSpace = (needed: number) => {
       if (y + needed > pageHeight - 50) {
         doc.addPage();
@@ -999,88 +998,64 @@ export default function Page() {
     };
 
     // ════════════════════════════════════════════════════════════════════
-    // HEADER
-    // Glow-Circles werden NUR innerhalb des Header-Rechtecks gezeichnet.
-    // jsPDF hat kein natives Clipping, daher zeichnen wir die Circles
-    // so klein und so positioniert, dass sie die Bounds nicht verlassen,
-    // und überdecken den Rand danach mit dem Header-Outline.
+    // HEADER – vollfläching von Rand zu Rand, kein Rahmen, kein Radius
+    // Exakt wie der SaaS-Header: dunkler Block, orange Glow links,
+    // orange Trennlinie unten
     // ════════════════════════════════════════════════════════════════════
-    const HEADER_H = 148;
-    const HEADER_Y = 10;
-    const HEADER_R = 20;
-    const HEADER_X = 12;
-    const HEADER_W = pageWidth - 24;
+    const HEADER_H = 150;
 
     const drawHeader = async () => {
-      // 1. Schatten
-      setF([192, 192, 194]);
-      doc.roundedRect(HEADER_X + 2, HEADER_Y + 5, HEADER_W, HEADER_H, HEADER_R, HEADER_R, "F");
-
-      // 2. Haupthintergrund (komplett dunkel, kein Glow ausserhalb)
+      // 1. Voller dunkler Hintergrund – 0,0 bis pageWidth, kein Radius
       setF(C.dark);
-      doc.roundedRect(HEADER_X, HEADER_Y, HEADER_W, HEADER_H, HEADER_R, HEADER_R, "F");
+      doc.rect(0, 0, pageWidth, HEADER_H, "F");
 
-      // 3. Warmer Glow – NUR als gefüllte abgestufte Kreise LINKS
-      //    Mittelpunkt so gewählt, dass alle Kreise innerhalb des Rects bleiben.
-      //    Max-Radius = min(cx - HEADER_X, HEADER_Y + HEADER_H - cy, cy - HEADER_Y)
-      //    Wir wählen cx=68, cy=Mitte → max safe radius ≈ 56
-      const gx = 72;
-      const gy = HEADER_Y + HEADER_H / 2;  // vertikal mittig
-      // Layered circles – radii und alphas so, dass alles gut innerhalb bleibt
-      // Größter Radius: gx - HEADER_X - 4 = 72 - 12 - 4 = 56 (links-sicher)
-      //                 HEADER_Y + HEADER_H - gy - 4 = 10+148 - 84 - 4 = 70 (unten-sicher)
-      //                 gy - HEADER_Y - 4 = 84 - 10 - 4 = 70 (oben-sicher)
-      // → max safe radius = 56
-      const glowLayers: Array<[number, number]> = [
-        [54, 0.45],
-        [38, 0.35],
-        [24, 0.25],
-        [13, 0.18],
+      // 2. Warmer Glow links – simuliert CSS blur-3xl
+      //    Mittelpunkt bei x=85, y=Mitte des Headers
+      //    Schichten von aussen nach innen, jede wird heller
+      const gx = 85;
+      const gy = HEADER_H / 2;
+
+      // Äussere weiche Schichten (gross, sehr transparent)
+      const glowOuter: Array<[number, number, number, number, number]> = [
+        // [r, R, G, B]  – direkte Farbe statt Alpha-Blending für mehr Kontrolle
+        [78, 35, 14,  8, 255],   // fast wie dark, leicht warm
+        [60, 60, 20, 10, 255],
+        [44, 90, 28, 12, 255],
+        [30, 130, 38, 14, 255],
+        [18, 175, 52, 20, 255],
+        [10, 210, 60, 22, 255],
       ];
-      for (const [r, a] of glowLayers) {
-        doc.setFillColor(
-          Math.round(C.orange[0] * a + C.dark[0] * (1 - a)),
-          Math.round(C.orange[1] * a + C.dark[1] * (1 - a)),
-          Math.round(C.orange[2] * a + C.dark[2] * (1 - a))
-        );
+      for (const [r, red, green, blue] of glowOuter) {
+        doc.setFillColor(red, green, blue);
         doc.circle(gx, gy, r, "F");
       }
-      // Innerster heller Kern
-      setF([210, 58, 20]);
-      doc.circle(gx, gy, 7, "F");
+      // Innerer heller Kern
+      doc.setFillColor(220, 62, 22);
+      doc.circle(gx, gy, 6, "F");
 
-      // 4. Rechte Seite: KEIN Glow-Circle mehr (war das Problem)
-      //    Stattdessen: leicht aufgehellter dunkler Block (Rectangle) für Tiefe
+      // 3. Rechte Seite leicht aufhellen (dark2 Ton) für Tiefe
       setF(C.dark2);
-      doc.roundedRect(pageWidth - 160, HEADER_Y, 148, HEADER_H, HEADER_R, HEADER_R, "F");
-      // Naht schliessen (der rechte Kreis hat links eine scharfe Kante)
-      doc.rect(pageWidth - 160, HEADER_Y, 20, HEADER_H, "F");
+      doc.rect(pageWidth - 120, 0, 120, HEADER_H, "F");
 
-      // 5. Header-Outline nochmals drüber – deckt alle Circle-Kanten ab
-      setD([40, 40, 45]);
-      doc.setLineWidth(2.5);
-      doc.roundedRect(HEADER_X, HEADER_Y, HEADER_W, HEADER_H, HEADER_R, HEADER_R, "S");
-      doc.setLineWidth(0.5);
+      // 4. Titeltext rechts – mit mehr Padding da kein Rahmen
+      const rx = pageWidth - 20;
 
-      // 6. Titeltext rechts
-      const rx = pageWidth - 36;
-      write("NEXTWAVE Manufacturing Hub 2.0", rx, HEADER_Y + 44, {
+      write("NEXTWAVE Manufacturing Hub 2.0", rx, 44, {
         size: 19, bold: true, color: C.orange, align: "right",
       });
-      write("Fertigungsprotokoll", rx, HEADER_Y + 70, {
+      write("Fertigungsprotokoll", rx, 70, {
         size: 13.5, bold: true, color: C.white, align: "right",
       });
-      write("NEXTWAVE GmbH – Premium Manufacturing Documentation", rx, HEADER_Y + 92, {
+      write("NEXTWAVE GmbH – Premium Manufacturing Documentation", rx, 92, {
         size: 8.5, color: [210, 210, 210], align: "right",
       });
-      write("© NEXTWAVE GmbH – All rights reserved 2026", rx, HEADER_Y + 110, {
-        size: 7.5, color: [155, 155, 155], align: "right",
+      write("© NEXTWAVE GmbH – All rights reserved 2026", rx, 110, {
+        size: 7.5, color: [150, 150, 150], align: "right",
       });
 
-      // 7. Orange Trennlinie unten
-      const lineY = HEADER_Y + HEADER_H + 4;
+      // 5. Orange Trennlinie – volle Breite, direkt unter Header
       setF(C.orange);
-      doc.roundedRect(HEADER_X, lineY, HEADER_W, 6, 3, 3, "F");
+      doc.rect(0, HEADER_H, pageWidth, 6, "F");
     };
 
     // ── Info-Card ────────────────────────────────────────────────────────
@@ -1160,9 +1135,6 @@ export default function Page() {
 
     const drawUnitCard = (r: Row, idx: number) => {
       const cardH = estimateUnitH(r);
-
-      // FIX: Seitenumbruch-Check MIT der tatsächlichen Card-Höhe
-      // Aber: Nur umbrechen wenn wirklich zu wenig Platz (mind. 80pt Minimum)
       const remainingSpace = pageHeight - 50 - y;
       if (remainingSpace < Math.min(cardH, 120)) {
         doc.addPage();
@@ -1233,7 +1205,9 @@ export default function Page() {
     // ════════════════════════════════════════════════════════════════════
 
     await drawHeader();
-    y = HEADER_Y + HEADER_H + 14 + 10;
+
+    // y startet unterhalb Header + Trennlinie + etwas Luft
+    y = HEADER_H + 6 + 18;
 
     const cardW = (contentWidth - 12) / 2;
     const leftRows = [
@@ -1265,7 +1239,7 @@ export default function Page() {
       writeWrapped(relevantPdfProducts.join("  •  "), margin + 16, y + 44, contentWidth - 32, {
         size: 9.5, color: C.text, lineHeight: 14,
       });
-      y += 58 + 24; // grosszügiger Abstand
+      y += 58 + 24;
     }
 
     // Fertigungseinheiten Überschrift
@@ -1276,9 +1250,9 @@ export default function Page() {
     y += 10;
     setD(C.line); doc.setLineWidth(0.5);
     doc.line(margin, y, pageWidth - margin, y);
-    y += 14; // direkt rein in die Cards
+    y += 14;
 
-    // Unit-Cards
+    // Unit-Cards – direkt auf Seite 1 starten
     for (let i = 0; i < rows.length; i++) {
       drawUnitCard(rows[i], i);
     }
