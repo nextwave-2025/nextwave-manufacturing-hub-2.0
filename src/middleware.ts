@@ -2,11 +2,20 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export function middleware(request: NextRequest) {
-  const session = request.cookies.get("session");
+  const { pathname } = request.nextUrl;
 
-  const isLoginPage = request.nextUrl.pathname.startsWith("/login");
+  const isPublicPath =
+    pathname === "/login" ||
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/favicon.ico");
 
-  if (!session && !isLoginPage) {
+  if (isPublicPath) {
+    return NextResponse.next();
+  }
+
+  const sessionCookie = request.cookies.get("session")?.value;
+
+  if (!sessionCookie) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
@@ -14,7 +23,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|login).*)",
-  ],
+  matcher: ["/((?!.*\\.).*)"],
 };
